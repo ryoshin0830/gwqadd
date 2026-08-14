@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { Buffer } from 'node:buffer';
 import { readFileSync, existsSync, readdirSync, renameSync, realpathSync } from 'node:fs';
@@ -27,6 +27,8 @@ OPTIONS
   --cmd <name>       function name emitted by --init (default: ${PKG})
   --from <ref>       branch from this ref instead of the current HEAD
   --expires <dur>    hand gwq an expiry (1h, 7d, …) for a throwaway worktree
+  --ai <cmd>         AI CLI used to suggest names (default: autodetected)
+  --no-ai            never ask an AI, even when one is installed
   --no-submodules    skip \`git submodule update --init --recursive\`
   -f, --force        move a colliding worktree directory aside instead of failing
   -n, --no-cd        do the work and report the path, but do not move the shell
@@ -40,8 +42,23 @@ EXAMPLES
   ${PKG} feat/login                  branch off HEAD, worktree, cd
   ${PKG} feat/login --from main      branch off main wherever you happen to be
   ${PKG} hotfix/x --expires 1d       gwq will mark it expired after a day
-  ${PKG}                             asks for the branch name
+  ${PKG}                             picks a type, then helps you name it
   ${PKG} -n --json feat/login        machine-readable, shell stays put
+
+NAMING HELP
+  Run ${PKG} with no branch name and it asks for a type (the list is built from
+  the prefixes this repository actually uses), then for a one-line description
+  in any language. Describe the work and an AI CLI turns it into three
+  candidates that match the repo's existing branch style; press Enter on an
+  empty description to skip that and type the name yourself.
+
+  The AI is whichever of these is on PATH — claude, codex, opencode, gemini —
+  invoked headlessly. Nothing is sent anywhere until you type a description,
+  and the suggestion is never accepted for you. Override with --ai '<cmd>' or
+  GWQADD_AI='<cmd>'; disable with --no-ai or GWQADD_AI=off.
+
+  None of this happens with a branch name on the command line, or without a
+  terminal — scripts and agents keep the plain, silent contract.
 
 WHERE IT BRANCHES FROM
   The current HEAD, exactly like \`git checkout -b\` — which means running this
@@ -106,6 +123,8 @@ try {
       cmd: { type: 'string' },
       from: { type: 'string' },
       expires: { type: 'string' },
+      ai: { type: 'string' },
+      'no-ai': { type: 'boolean' },
       'no-submodules': { type: 'boolean' },
       force: { type: 'boolean', short: 'f' },
       'no-cd': { type: 'boolean', short: 'n' },
@@ -531,6 +550,289 @@ function defaultBranch(dir) {
   return head ? head.replace(/^refs\/remotes\/origin\//, '') : '';
 }
 
+// ── naming help (interactive only) ───────────────────────────────────────────
+
+// Conventional Commits types, used to fill out the menu when the repository is
+// new or has no prefix habit of its own.
+const CONVENTIONAL = ['feat', 'fix', 'docs', 'refactor', 'test', 'chore', 'perf'];
+
+// What this repository actually calls things. A repo that says `feature/` must
+// not be offered `feat/` first — house style beats the spec.
+function branchPrefixes(dir) {
+  const out = gitOut(dir, [
+    'for-each-ref', '--format=%(refname:short)', '--sort=-committerdate',
+    '--count=300', 'refs/heads', 'refs/remotes/origin',
+  ]);
+  const names = new Set();
+  for (let b of out.split('\n')) {
+    b = b.trim();
+    if (!b || b === 'HEAD' || b === 'origin/HEAD') continue;
+    if (b.startsWith('origin/')) b = b.slice('origin/'.length);
+    names.add(b); // dedupe: a branch present locally and on origin counts once
+  }
+  const counts = new Map();
+  for (const b of names) {
+    const i = b.indexOf('/');
+    if (i <= 0) continue;
+    const p = b.slice(0, i);
+    counts.set(p, (counts.get(p) ?? 0) + 1);
+  }
+  return { counts: [...counts.entries()].sort((a, b) => b[1] - a[1]), names: [...names] };
+}
+
+function typeMenu(prefixes) {
+  const items = [];
+  const seen = new Set();
+  for (const [prefix, count] of prefixes) {
+    if (items.length >= 6) break;
+    seen.add(prefix);
+    items.push({ prefix, count });
+  }
+  for (const prefix of CONVENTIONAL) {
+    if (items.length >= 8) break;
+    if (seen.has(prefix)) continue;
+    seen.add(prefix);
+    items.push({ prefix, count: 0 });
+  }
+  return items;
+}
+
+// Numbers, not mnemonic letters: `feat` and `fix` both want `f`, and the menu
+// is built from the repository so the entries are not known in advance.
+async function pickType(items) {
+  log(`${dim('│')}`);
+  log(`${dim('│')} ${bold('type?')}`);
+  const cols = [];
+  for (const [i, it] of items.entries()) {
+    const n = cyan(String(i + 1));
+    const used = it.count ? dim(` (${it.count})`) : '';
+    cols.push(`${n}) ${it.prefix}/${used}`);
+  }
+  for (let i = 0; i < cols.length; i += 3) {
+    log(`${dim('│')}   ${cols.slice(i, i + 3).join('   ')}`);
+  }
+  log(`${dim('│')}   ${cyan('0')}) no prefix   ${cyan('o')}) type your own`);
+  stderr.write(`${dim('│')} ${dim('>')} `);
+
+  const buf = await waitForKey();
+  stderr.write('\n');
+  if (buf.includes(0x03) || buf[0] === 0x1b) die('E_INTERRUPTED', 'cancelled');
+  const c = buf[0];
+  if (c === 0x30) return '';                       // 0
+  if (c === 0x6f || c === 0x4f) {                  // o / O
+    const own = (await askLine(`${dim('│')} prefix (no slash): `)).replace(/\/+$/, '');
+    return own;
+  }
+  const idx = c - 0x31;                            // 1..8
+  if (idx >= 0 && idx < items.length) return items[idx].prefix;
+  return items[0]?.prefix ?? '';
+}
+
+// ── the AI layer ─────────────────────────────────────────────────────────────
+
+// Delegate to whatever agent CLI the user already has, rather than embedding an
+// API client. No key to store, no account to create, no new dependency, and it
+// bills to whatever they already pay for. Order is by how reliably each one
+// answers a bare prompt headlessly.
+const AI_CLIS = [
+  { bin: 'claude', args: ['-p'] },
+  { bin: 'codex', args: ['exec'] },
+  { bin: 'opencode', args: ['run'] },
+  { bin: 'gemini', args: ['-p'] },
+];
+
+function detectAi() {
+  if (values['no-ai']) return null;
+  const override = values.ai ?? process.env.GWQADD_AI;
+  if (override != null && override !== '') {
+    if (['off', '0', 'false', 'none'].includes(override)) return null;
+    // Split on whitespace only: quoting rules would be a shell of our own.
+    const parts = override.split(/\s+/).filter(Boolean);
+    return { bin: parts[0], args: parts.slice(1) };
+  }
+  return AI_CLIS.find((c) => commandExists(c.bin)) ?? null;
+}
+
+function namingPrompt(prefix, description, examples) {
+  return [
+    'You name git branches. Reply with exactly 3 candidate names, one per line.',
+    'No numbering, no bullets, no quotes, no code fences, no explanation.',
+    prefix
+      ? `Every candidate MUST begin with "${prefix}/".`
+      : 'Do not add a type prefix.',
+    'After the prefix use lowercase ASCII words joined by hyphens. Keep each candidate under 40 characters. Be specific, not generic.',
+    examples.length
+      ? `Existing branches in this repository — match their style:\n${examples.join('\n')}`
+      : '',
+    `The work to name, written in the author's own language:\n${description}`,
+  ].filter(Boolean).join('\n\n');
+}
+
+// spawnSync would freeze the terminal for the 6-8 seconds these CLIs take to
+// boot, with no sign of life. Async plus an elapsed counter is the difference
+// between "working" and "hung".
+function runAi(ai, prompt) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(ai.bin, [...ai.args, prompt], { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err) {
+      return resolve({ ok: false, out: '', err: String(err?.message ?? err) });
+    }
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
+    const kill = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, 60_000);
+    child.on('error', (e) => {
+      clearTimeout(kill);
+      resolve({ ok: false, out: '', err: String(e?.message ?? e) });
+    });
+    child.on('close', (code) => {
+      clearTimeout(kill);
+      resolve({ ok: code === 0, out, err });
+    });
+  });
+}
+
+async function askAi(ai, prompt) {
+  const label = `${ai.bin}${ai.args.length ? ' ' + ai.args.join(' ') : ''}`;
+  const started = Date.now();
+  let tick;
+  if (stderrTTY) {
+    tick = setInterval(() => {
+      const s = Math.round((Date.now() - started) / 1000);
+      stderr.write(`\r${dim('│')} asking ${cyan(ai.bin)}… ${dim(`${s}s`)}   `);
+    }, 250);
+  } else {
+    log(`${dim('│')} asking ${label}…`);
+  }
+  try {
+    return await runAi(ai, prompt);
+  } finally {
+    if (tick) {
+      clearInterval(tick);
+      stderr.write(`\r${' '.repeat(40)}\r`);
+    }
+  }
+}
+
+// Models add bullets, backticks and commentary no matter how firmly asked not
+// to. Keep only things that could actually be branch names, and let git have
+// the final say on each one.
+function parseCandidates(text, prefix) {
+  const cleaned = text.split('\n')
+    .map((l) => l.trim())
+    .map((l) => l.replace(/^[-*•]\s*/, ''))
+    .map((l) => l.replace(/^\d+[.)]\s*/, ''))
+    .map((l) => l.replace(/^[`'"]+|[`'"]+$/g, ''))
+    .filter(Boolean)
+    .filter((l) => !/\s/.test(l))
+    .filter((l) => /^[A-Za-z0-9._/-]+$/.test(l));
+
+  const take = (list) => {
+    const seen = new Set();
+    const out = [];
+    for (const name of list) {
+      if (seen.has(name) || !validBranchName(name)) continue;
+      seen.add(name);
+      out.push(name);
+      if (out.length === 3) break;
+    }
+    return out;
+  };
+
+  if (!prefix) return take(cleaned);
+  const onPrefix = take(cleaned.filter((l) => l.startsWith(`${prefix}/`)));
+  if (onPrefix.length) return onPrefix;
+  // The model ignored the prefix. Its words are still useful; the shape is ours.
+  return take(cleaned.map((l) => `${prefix}/${l.replace(/^[^/]+\//, '')}`));
+}
+
+const validBranchName = (name) =>
+  !!name && spawnSync('git', ['check-ref-format', '--branch', name], { stdio: 'ignore' }).status === 0;
+
+// Only ASCII is reshaped. A description in Japanese is what the AI is for, and
+// mangling it into hyphens here would produce a worse name than leaving it be.
+function slugify(s) {
+  const t = s.trim();
+  if (/[^\x00-\x7F]/.test(t)) return t.replace(/\s+/g, '-');
+  return t.toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-z0-9./-]/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/(^[-/]+)|([-/]+$)/g, '');
+}
+
+const join = (prefix, rest) => (prefix ? `${prefix}/${rest}` : rest);
+
+async function typeItYourself(prefix) {
+  for (;;) {
+    const raw = await askLine(`${dim('│')} ${prefix ? `${prefix}/` : 'branch: '}`);
+    if (!raw) die('E_INTERRUPTED', 'cancelled');
+    const name = join(prefix, slugify(raw));
+    if (validBranchName(name)) return name;
+    warn(`'${name}' is not a valid branch name — try again`);
+  }
+}
+
+async function chooseFromCandidates(candidates, prefix) {
+  for (;;) {
+    log(`${dim('│')}`);
+    for (const [i, c] of candidates.entries()) {
+      log(`${dim('│')}  ${cyan(String(i + 1))}) ${c}`);
+    }
+    log(`${dim('│')}  ${cyan('e')}) type it yourself   ${cyan('r')}) regenerate`);
+    stderr.write(`${dim('│')} ${dim('>')} `);
+    const buf = await waitForKey();
+    stderr.write('\n');
+    if (buf.includes(0x03) || buf[0] === 0x1b) die('E_INTERRUPTED', 'cancelled');
+    const c = buf[0];
+    if (c === 0x65 || c === 0x45) return { pick: await typeItYourself(prefix) };
+    if (c === 0x72 || c === 0x52) return { regenerate: true };
+    const idx = c - 0x31;
+    if (idx >= 0 && idx < candidates.length) return { pick: candidates[idx] };
+    // Enter, or anything unrecognised, takes the first suggestion.
+    if (c === 0x0d || c === 0x0a) return { pick: candidates[0] };
+  }
+}
+
+// The whole interactive path. Returns a branch name that git has already
+// accepted; never runs unless there is a terminal and no positional was given.
+async function composeBranchName(dir) {
+  const { counts, names } = branchPrefixes(dir);
+  const prefix = await pickType(typeMenu(counts));
+
+  const ai = detectAi();
+  const hint = ai
+    ? `${dim('(any language — Enter alone to name it yourself)')}`
+    : `${dim('(Enter alone to name it yourself)')}`;
+  log(`${dim('│')}`);
+  const description = ai
+    ? await askLine(`${dim('│')} what are you doing? ${hint}\n${dim('│')} ${dim('>')} `)
+    : '';
+
+  if (!description) return typeItYourself(prefix);
+
+  const examples = names.filter((n) => n.includes('/')).slice(0, 15);
+  for (;;) {
+    const res = await askAi(ai, namingPrompt(prefix, description, examples));
+    if (!res.ok) {
+      warn(`${ai.bin} failed — naming it yourself instead`);
+      const first = (res.err || '').trim().split('\n')[0];
+      if (first) log(`${dim('│')} ${dim(first.slice(0, 120))}`);
+      return typeItYourself(prefix);
+    }
+    const candidates = parseCandidates(res.out, prefix);
+    if (candidates.length === 0) {
+      warn(`${ai.bin} returned nothing usable — naming it yourself instead`);
+      return typeItYourself(prefix);
+    }
+    const choice = await chooseFromCandidates(candidates, prefix);
+    if (choice.pick) return choice.pick;
+  }
+}
+
 // ── width / box ──────────────────────────────────────────────────────────────
 
 // Rough East Asian Width: 全角 CJK + 全角ラテン + half-symbols treated as wide.
@@ -643,39 +945,41 @@ async function main() {
   const repo = resolveRepo();
   const cwd = process.cwd();
 
-  let branch = positionals[0];
-  if (!branch) {
-    if (isNonInteractive) {
-      die('E_VALIDATION', 'a branch name is required — `gwqadd <branch>`');
-    }
-    log(`${dim('┌')} ${bold(PKG)} ${dim(repo.name)}`);
-    branch = await askLine(`${dim('│')} new branch: `);
-    if (!branch) die('E_INTERRUPTED', 'cancelled');
-  } else {
-    log(`${dim('┌')} ${bold(PKG)} ${dim(repo.name)}`);
-  }
-
-  // git would reject this later with a less obvious message.
-  const check = spawnSync('git', ['check-ref-format', '--branch', branch], { stdio: 'ignore' });
-  if (check.status !== 0) {
-    die('E_VALIDATION', `'${branch}' is not a valid branch name`);
-  }
-
   const base = resolveBase(cwd, values.from);
-  const branchExisted = hasLocalBranch(cwd, branch);
 
+  // Where you are and what you are cutting from come first — before any naming,
+  // because both are things you would want to correct before investing in a
+  // branch name, and the base especially is easy to get silently wrong.
+  log(`${dim('┌')} ${bold(PKG)} ${dim(repo.name)}`);
   log(`${dim('│')} repo    ${cyan(repo.name)} ${dim(repo.root)}`);
   if (repo.inLinkedWorktree) {
     log(`${dim('│')} cwd     ${dim('a linked worktree of it')} ${dim(repo.cwdTop)}`);
   }
-  if (!branchExisted) {
-    log(`${dim('│')} base    ${cyan(base.ref)} ${dim(base.sha.slice(0, 7))}`);
-    // The silent version of this is the whole reason --from exists: running
-    // inside a feature worktree branches off that feature, not off main.
-    const def = defaultBranch(cwd);
-    if (!values.from && def && base.ref !== def && base.ref !== `origin/${def}`) {
-      warn(`branching from ${base.ref}, not the default branch — pass \`--from ${def}\` if that is not what you meant`);
+  log(`${dim('│')} base    ${cyan(base.ref)} ${dim(base.sha.slice(0, 7))}`);
+  // The silent version of this is the whole reason --from exists: running
+  // inside a feature worktree branches off that feature, not off main.
+  const def = defaultBranch(cwd);
+  if (!values.from && def && base.ref !== def && base.ref !== `origin/${def}`) {
+    warn(`branching from ${base.ref}, not the default branch — pass \`--from ${def}\` if that is not what you meant`);
+  }
+
+  let branch = positionals[0];
+  if (branch) {
+    // git would reject this later with a less obvious message.
+    if (!validBranchName(branch)) {
+      die('E_VALIDATION', `'${branch}' is not a valid branch name`);
     }
+  } else {
+    if (isNonInteractive) {
+      die('E_VALIDATION', 'a branch name is required — `gwqadd <branch>`');
+    }
+    // composeBranchName only ever returns a name git has already accepted.
+    branch = await composeBranchName(cwd);
+  }
+
+  const branchExisted = hasLocalBranch(cwd, branch);
+  if (branchExisted) {
+    log(`${dim('│')} ${dim(`${branch} already exists — the base above is not used`)}`);
   }
 
   git(cwd, ['worktree', 'prune'], { stdio: 'ignore' }); // clear hand-deleted leftovers
@@ -695,7 +999,7 @@ async function main() {
   let addArgs;
   if (branchExisted) {
     addArgs = [branch];
-    log(`${dim('│')} ${dim('branch exists — creating its worktree only')}`);
+    log(`${dim('│')} ${dim('creating its worktree only')}`);
   } else if (values.from) {
     const made = git(cwd, ['branch', branch, values.from]);
     if (made.status !== 0) {

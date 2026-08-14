@@ -16,6 +16,35 @@ Create a branch and its [gwq](https://github.com/d-kuro/gwq) worktree in the rep
 One command instead of: `git checkout -b` → realise you wanted a worktree →
 `gwq add -b` → find where it landed → `cd`.
 
+Run it with no branch name and it helps you pick one:
+
+```console
+~/ghq/github.com/you/api $ gwqadd
+┌ gwqadd api
+│ repo    api /Users/you/ghq/github.com/you/api
+│ base    main 8f2c1a9
+│
+│ type?
+│   1) feat/ (12)   2) fix/ (7)   3) chore/ (2)
+│   4) docs/   5) refactor/   6) test/
+│   7) perf/
+│   0) no prefix   o) type your own
+│ > 1
+│
+│ what are you doing? (any language — Enter alone to name it yourself)
+│ > ログイン画面で連打するとセッションが壊れる
+│
+│  1) feat/login-rapid-click-session
+│  2) feat/login-double-submit-guard
+│  3) feat/prevent-session-corruption
+│  e) type it yourself   r) regenerate
+│ > 1
+└ ✓ feat/login-rapid-click-session → …
+```
+
+The type list is built from the prefixes **this repository actually uses**, so a
+repo that says `feature/` is never offered `feat/`.
+
 ## Install
 
 ```sh
@@ -76,6 +105,43 @@ So the fix is one flag:
 gwqadd feat/logout --from main
 ```
 
+## Naming help
+
+Two layers, and the first needs no network at all.
+
+**The type menu** is derived from `git for-each-ref` — the prefixes this
+repository already uses come first, with their counts, and the Conventional
+Commits types fill out the rest. Pick `o` to type a prefix of your own, or `0`
+for none.
+
+**The suggestions** come from whichever AI CLI is already on your `PATH`:
+
+```
+claude -p    →    codex exec    →    opencode run    →    gemini -p
+```
+
+There is no API key to obtain and no account to create — it uses what you
+already have, and bills to whatever you already pay for. Expect 6–8 seconds,
+almost all of it the CLI's own start-up; an elapsed counter runs while it works.
+
+Because the prompt includes a sample of the repository's existing branch names,
+the suggestions match your house style rather than a generic template. Describe
+the work in any language; the names come back in ASCII.
+
+| | |
+| --- | --- |
+| pick a different CLI | `--ai 'gemini -p'`, or `GWQADD_AI='gemini -p'` |
+| turn it off | `--no-ai`, or `GWQADD_AI=off` |
+| skip it for one run | press Enter on an empty description |
+
+**What is sent, and when.** Nothing leaves your machine until you type a
+description. At that point the description, the chosen prefix and up to 15
+existing branch names from the repository are passed to that CLI. A suggestion
+is never accepted for you — you always pick, edit or regenerate.
+
+None of this happens when you pass a branch name on the command line, or when
+there is no terminal. Scripts and agents keep the plain, silent contract.
+
 ## What it does
 
 1. Work out which repository you are in — any worktree of it will do.
@@ -107,6 +173,8 @@ gwqadd [options] [<branch>]
 | `--cmd <name>` | function name emitted by `--init` (default: `gwqadd`) |
 | `--from <ref>` | branch from this ref instead of the current HEAD |
 | `--expires <dur>` | hand gwq an expiry (`1h`, `7d`, …) for a throwaway worktree |
+| `--ai <cmd>` | AI CLI used to suggest names (default: autodetected) |
+| `--no-ai` | never ask an AI, even when one is installed |
 | `--no-submodules` | skip `git submodule update --init --recursive` |
 | `-f`, `--force` | move a colliding worktree directory aside instead of failing |
 | `-n`, `--no-cd` | do the work and report the path, but do not move the shell |
@@ -116,7 +184,7 @@ gwqadd [options] [<branch>]
 | `-h`, `--help` | show help |
 | `-V`, `--version` | show version |
 
-Run it with no branch name and it asks for one.
+Run it with no branch name and it walks you through the naming help above.
 
 ## For scripts and AI agents
 

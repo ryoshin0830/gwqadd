@@ -193,6 +193,58 @@ The branch prompt uses `node:readline/promises`, not a prompt library; the
 confirm uses the raw-mode keypress reader already present. No `fzf` and no `jq`
 either — this is the lightest tool in the family, and it should stay that way.
 
+### I15. The naming layer is interactive-only
+
+`composeBranchName()` runs when **and only when** there is no positional and
+`isNonInteractive` is false. A branch name on the command line is the user
+speaking; never second-guess it, and never let a script or an agent trigger a
+prompt, a subprocess or a network round trip it did not ask for.
+
+Both halves are tested with a canary "AI" that records its own invocation, so
+the absence is provable rather than assumed. Keep those tests.
+
+### I16. Delegate to an installed AI CLI; never embed an API client
+
+The suggestion layer shells out to `claude -p` / `codex exec` /
+`opencode run` / `gemini -p`, whichever is on `PATH`, overridable with `--ai`
+or `GWQADD_AI`. This is deliberate:
+
+- no API key to store, so the tool never holds a secret;
+- no account to create, and no cost beyond what the user already pays;
+- no HTTP client, no provider SDK, no I12 violation.
+
+Measured on 2026-08-14, all four take **6–8 seconds**, and it is start-up, not
+inference — `claude --model haiku` is no faster. That is why `runAi` is async
+with an elapsed counter instead of a blocking `spawnSync`: a silent eight-second
+freeze reads as a hang. A 60s SIGKILL bounds the worst case.
+
+Every failure path — CLI missing, non-zero exit, unparseable output, zero usable
+candidates — falls through to `typeItYourself()`. The AI is an accelerator; it
+must never be able to block the user from naming a branch.
+
+### I17. The model's output is never trusted as a branch name
+
+`parseCandidates()` strips bullets, numbering and quotes, drops anything with
+whitespace or characters git would reject, and then runs
+`git check-ref-format --branch` on each survivor. Only names git has already
+accepted are ever offered.
+
+If the model ignores the requested prefix, its words are still reused but the
+shape is ours (`<prefix>/<its-last-segment>`). And the user always picks —
+there is no path where a suggestion is accepted automatically.
+
+### I18. The type menu comes from the repository, not from a spec
+
+`branchPrefixes()` reads `git for-each-ref` and ranks the prefixes actually in
+use; the Conventional Commits list only fills the remaining slots. A repo that
+says `feature/` must never be offered `feat/` first.
+
+Local and origin copies of the same branch are deduped before counting, or
+every branch would score twice.
+
+The menu is keyed by **numbers**, not mnemonic letters: `feat` and `fix` both
+want `f`, and the entries are not known until the repo is read.
+
 ### I13. Raw mode cleanup
 
 `setRawMode(true)` is guarded by `stdin.isTTY`. Cleanup runs on `exit`,
@@ -262,12 +314,28 @@ Two traps for anyone adding tests:
   `FORCE_COLOR`, because we set `NO_COLOR` and node warns to stderr when it sees
   both. That failed a sibling package's suite at `npm publish` time.
 
+**The interactive flow cannot be automated here.** macOS `script` calls
+`tcgetattr` on its own stdin and fails under a pipe, so it cannot be driven from
+`spawnSync`; a real pty would mean a dependency, which I12 forbids. Driving it
+from an interactive shell by hand works (`script -q /dev/null zsh -c '…'` with
+keystrokes piped in) and is what the matrix below assumes. Do not spend an
+afternoon rediscovering this.
+
 Not covered — run by hand:
 
 | Scenario | Command | Expect |
 | --- | --- | --- |
-| Prompt | `gwqadd` in a repo | asks for a branch name, then lands |
-| Prompt cancel | `gwqadd`, empty answer | exit 130, nothing created |
+| Type menu | `gwqadd` in a repo with history | repo's own prefixes first, with counts |
+| Manual naming | `gwqadd`, pick a type, empty description | asks for the slug, slugifies it |
+| AI naming | `gwqadd`, pick a type, describe in Japanese | 3 ASCII candidates in the repo's style |
+| AI counter | during the above | elapsed seconds tick, then the line clears |
+| Regenerate | at the candidate list, press `r` | asks again, new candidates |
+| Edit out | at the candidate list, press `e` | falls through to typing it yourself |
+| Cancel | Esc at either picker | exit 130, nothing created |
+| No AI installed | `PATH=/usr/bin:/bin gwqadd` | skips straight to typing it yourself |
+| AI broken | `GWQADD_AI=false gwqadd` | warns, falls through to typing it yourself |
+| AI disabled | `gwqadd --no-ai` | no description prompt at all |
+| Messy model output | `GWQADD_AI='printf "- \`feat/a\`\nhere you go:\nfeat/b\n"' gwqadd` | offers `feat/a`, `feat/b` only |
 | Real gwq layout | `gwqadd feat/x` in a ghq repo | lands under gwq's `worktree.basedir` |
 | `--expires` | `gwqadd tmp/x --expires 1h` | gwq records the expiry |
 | Submodules | in a repo with submodules | submodules populated |
@@ -289,9 +357,13 @@ Not covered — run by hand:
 
 ## Things that are intentionally NOT here
 
-- **An fzf picker.** Nothing here needs choosing: the branch is typed, and the
-  base is HEAD or `--from`. Staying fzf-free keeps this the one tool in the
-  family with no finder dependency.
+- **An fzf picker.** The two things that need choosing — the type and the
+  suggestion — are short numbered lists a single keypress handles. Staying
+  fzf-free keeps this the one tool in the family with no finder dependency.
+- **An embedded LLM client, or a bundled API key.** See I16. If someone asks for
+  "just add Groq", the answer is `GWQADD_AI='<their own command>'`.
+- **Caching AI suggestions.** They are cheap, and a stale suggestion for a
+  different piece of work is worse than waiting.
 - **Removing worktrees or branches.** `gwq remove` and `git branch -D` are
   destructive; the only deletion here is the I3 rollback of our own branch.
 - **Pushing or setting upstream.** `git push -u` is one command and the user

@@ -374,3 +374,72 @@ test('a missing gwq exits 127 with the brew command', () => {
   assert.equal(jsonLine(r.stderr).error.code, 'E_DEPS');
   assert.match(jsonLine(r.stderr).error.message, /brew install d-kuro\/tap\/gwq/);
 });
+
+// ── the naming layer ─────────────────────────────────────────────────────────
+//
+// The interactive flow itself cannot be driven from here: macOS `script` calls
+// tcgetattr on its own stdin and fails under a pipe, and a real pty would mean
+// a dependency. What IS testable — and is the part that would be dangerous to
+// get wrong — is that none of it engages without a terminal.
+
+// An "AI" that records every invocation, so its absence is provable.
+function canaryAi() {
+  const dir = mkdtempSync(join(tmpdir(), 'gwqadd-canary-'));
+  const marker = join(dir, 'called');
+  const bin = join(dir, 'canary-ai');
+  writeFileSync(bin, `#!/bin/sh\necho called >> ${marker}\nprintf 'feat/a\\nfeat/b\\nfeat/c\\n'\n`);
+  chmodSync(bin, 0o755);
+  return { dir, bin, marker, called: () => existsSync(marker) };
+}
+
+test('a branch name on the command line never reaches the AI', () => {
+  const ai = canaryAi();
+  const r = spawnSync(process.execPath, [BIN, '--json', '-n', 'feat/explicit'], {
+    encoding: 'utf8', cwd: repo,
+    env: {
+      ...process.env, PATH: `${shimDir}:${process.env.PATH}`,
+      NO_COLOR: '1', GWQADD_AI: ai.bin, FORCE_COLOR: undefined,
+    },
+  });
+  const called = ai.called();
+  rmSync(ai.dir, { recursive: true, force: true });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).branch, 'feat/explicit');
+  assert.equal(called, false, 'an explicit name is the user speaking; do not second-guess it');
+});
+
+test('without a TTY the naming layer never engages, AI included', () => {
+  const ai = canaryAi();
+  const r = spawnSync(process.execPath, [BIN, '--json'], {
+    encoding: 'utf8', cwd: repo,
+    env: {
+      ...process.env, PATH: `${shimDir}:${process.env.PATH}`,
+      NO_COLOR: '1', GWQADD_AI: ai.bin,
+    },
+  });
+  const called = ai.called();
+  rmSync(ai.dir, { recursive: true, force: true });
+  assert.equal(r.status, 1);
+  assert.equal(jsonLine(r.stderr).error.code, 'E_VALIDATION');
+  assert.equal(called, false, 'scripts and agents keep the silent contract');
+});
+
+test('--no-ai and --ai are accepted and change nothing non-interactively', () => {
+  for (const extra of [['--no-ai'], ['--ai', 'canary-ai']]) {
+    const r = run([...extra, '--json', '-n', 'feat/flag']);
+    assert.equal(r.status, 0, `${extra.join(' ')}: ${r.stderr}`);
+    assert.equal(JSON.parse(r.stdout).branch, 'feat/flag');
+    // Reset for the next iteration.
+    const wt = JSON.parse(r.stdout).path;
+    spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', wt]);
+    spawnSync('git', ['-C', repo, 'branch', '-D', 'feat/flag']);
+  }
+});
+
+test('--help documents the naming help and how to turn it off', () => {
+  const h = run(['--help']).stdout;
+  assert.match(h, /NAMING HELP/);
+  assert.match(h, /GWQADD_AI/);
+  assert.match(h, /--no-ai/);
+  assert.match(h, /claude, codex, opencode, gemini/);
+});

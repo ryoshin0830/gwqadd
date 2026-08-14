@@ -73,6 +73,17 @@ gwqadd -n --json --from "${base:-main}" feat/x
 Read `base.ref` and `base.sha` back from the result and tell the user what the
 branch was cut from.
 
+## The interactive naming help is not for you
+
+Run without a branch name and without a TTY, gwqadd exits 1 (`E_VALIDATION`) —
+it does **not** prompt, and it does **not** invoke an AI. That is deliberate:
+the type menu and the AI-suggested names exist for a human at a terminal.
+
+So always pass the branch name. You are the one naming it; if you want ideas,
+generate them yourself and pass the result. Do not try to reach the naming flow
+by allocating a pty, and do not set `GWQADD_AI` expecting it to fire — with a
+name on the command line it never runs.
+
 ## A typo becomes a new branch
 
 A branch name that exists nowhere is **created**. That is the point of the tool,
