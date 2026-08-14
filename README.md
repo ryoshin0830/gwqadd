@@ -45,14 +45,18 @@ Then add the shell integration:
 
 ```sh
 # zsh  — ~/.zshrc
-eval "$(gwqadd --init zsh)"
+eval "$(command gwqadd --init zsh)"
 
 # bash — ~/.bashrc
-eval "$(gwqadd --init bash)"
+eval "$(command gwqadd --init bash)"
 
 # fish — ~/.config/fish/config.fish
-gwqadd --init fish | source
+command gwqadd --init fish | source
 ```
+
+`command` matters: each tool defines a shell function with its own name, so on a
+second `source ~/.zshrc` the *function* would answer, capture the `--init` output
+and try to `cd` into it. `command` skips functions and goes to the binary.
 
 Reload the shell and `gwqadd` moves it.
 

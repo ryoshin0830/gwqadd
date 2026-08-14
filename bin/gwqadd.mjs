@@ -25,7 +25,7 @@ const HELP = `${PKG} ${VERSION} — create a branch and its gwq worktree here, a
 
 USAGE
   ${PKG} [options] [<branch>]
-  eval "$(${PKG} --init zsh)"        # then \`${PKG}\` moves the shell itself
+  eval "$(command ${PKG} --init zsh)"   # then \`${PKG}\` moves the shell itself
 
 OPTIONS
   --init <shell>     print shell integration for zsh | bash | fish, then exit
@@ -247,7 +247,7 @@ function shellInit(shell, fnName) {
 
   if (shell === 'zsh') {
     return `# ${PKG} ${VERSION} — zsh integration
-# Add to ~/.zshrc:  eval "$(${PKG} --init zsh)"
+# Add to ~/.zshrc:  eval "$(command ${PKG} --init zsh)"
 
 __${slug}_fallback=${shq(SELF)}
 
@@ -290,7 +290,7 @@ ${fnName}() {
 
   if (shell === 'bash') {
     return `# ${PKG} ${VERSION} — bash integration
-# Add to ~/.bashrc:  eval "$(${PKG} --init bash)"
+# Add to ~/.bashrc:  eval "$(command ${PKG} --init bash)"
 
 __${slug}_fallback=${shq(SELF)}
 
@@ -330,7 +330,7 @@ ${fnName}() {
 
   if (shell === 'fish') {
     return `# ${PKG} ${VERSION} — fish integration
-# Add to ~/.config/fish/config.fish:  ${PKG} --init fish | source
+# Add to ~/.config/fish/config.fish:  command ${PKG} --init fish | source
 
 set -g __${slug}_fallback ${fishq(SELF)}
 
@@ -1202,7 +1202,7 @@ async function finish({ repo, branch, base, path, created }) {
   stderr.write('\n');
   stderr.write(renderBox(cdCommand) + '\n');
   stderr.write(
-    `   ${dim('tip:')} ${dim(`eval "$(${PKG} --init zsh)"`)} ${dim('lets')} ` +
+    `   ${dim('tip:')} ${dim(`eval "$(command ${PKG} --init zsh)"`)} ${dim('lets')} ` +
     `${bold(PKG)} ${dim('cd for you')}\n`,
   );
 
