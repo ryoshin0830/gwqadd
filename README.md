@@ -135,6 +135,11 @@ question. At that point the sentence, the repository name, its branch names and
 your modified file *paths* (never contents) go to that CLI. Nothing is created
 until you confirm.
 
+The CLI is run in an **empty temporary directory**, not in your repository.
+These tools are agents: given a repo they will read `CLAUDE.md`, your source and
+your git log, and then name the branch after what they found instead of what you
+asked for. Everything they should know is already in the prompt.
+
 None of this happens when you pass a branch name on the command line, or when
 there is no terminal. Scripts and agents keep the plain, silent contract.
 

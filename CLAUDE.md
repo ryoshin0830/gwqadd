@@ -265,7 +265,31 @@ The porcelain parse therefore uses `git()` directly, and handles ` -> ` renames
 and `"quoted paths"`. There is a regression test that also asserts the broken
 behaviour of the trimmed version, so nobody simplifies it back.
 
-### I21. The naming layer never blocks
+### I21. The AI runs in an empty directory, never in the user's repository
+
+These CLIs are **agents**, not text transformers. Run one with `cwd` inside a
+repository and it reads `CLAUDE.md`, the source and the git log, then names the
+branch after what it found rather than what the user typed. This shipped broken
+in 0.3.0 and was reported immediately: the description was `uiのバグの修正` and
+the suggestion came back `feat/naming-prompt-repo-context` — a phrase lifted
+straight out of *this repository's* `CLAUDE.md`.
+
+Measured, same description, three runs each:
+
+| `cwd` | results |
+| --- | --- |
+| this repo | `feat/ui-bug-fix`, `fix/ui-display-bug`, `feat/ui-bug-fix` |
+| empty dir | `fix/ui-display-bug` ×3 |
+
+In-repo it both wavered and chose `feat/` for a bug fix twice. So `runAi()`
+mkdtemps a directory, runs there, and removes it. Everything the model
+legitimately needs is already in the prompt (I18); giving it a repository to
+read makes the answer worse, not better, and quietly widens what it sees.
+
+If `mkdtemp` fails, the run inherits cwd rather than refusing — a degraded
+answer beats no answer — but that is a fallback, not the path.
+
+### I22. The naming layer never blocks
 
 Every failure — CLI missing, non-zero exit, unparseable output, no usable
 candidate — falls through to `typeItYourself()`. That prompt rejects non-ASCII
@@ -351,6 +375,8 @@ Not covered — run by hand:
 | Edit | at the confirm, press `e` | prompt pre-filled with the suggestion |
 | Cancel | Esc at either prompt | exit 130, nothing created |
 | Dirty tree | modify files first | their paths reach the prompt, and the name reflects them |
+| AI sandbox | a `GWQADD_AI` script that runs `pwd >&2` | prints a temp dir, never the repo (I21) |
+| No repo contamination | `gwqadd` in this repo, describe unrelated work | the name follows the description, not CLAUDE.md |
 | No AI installed | `PATH=/usr/bin:/bin gwqadd` | straight to the ASCII-name prompt |
 | AI broken | `GWQADD_AI=false gwqadd` | warns, falls through to that prompt |
 | AI disabled | `gwqadd --no-ai` | no description prompt at all |

@@ -2,7 +2,12 @@
 import { spawnSync, spawn } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { Buffer } from 'node:buffer';
-import { readFileSync, existsSync, readdirSync, renameSync, realpathSync } from 'node:fs';
+import {
+  readFileSync, existsSync, readdirSync, renameSync, realpathSync,
+  mkdtempSync, rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join as joinPath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 
@@ -627,6 +632,7 @@ function namingPrompt(ctx, description, rejected) {
       ? `Files already modified in the working tree, which is what the work touches:\n${ctx.dirty.map((f) => `  ${f}`).join('\n')}`
       : '',
     'Include the prefix and a slash. After it use lowercase ASCII words joined by hyphens. Under 40 characters. Be specific about this change, not generic.',
+    'The description below is the only thing the branch is about. Do not name it after anything else you can see.',
     rejected.length
       ? `These were rejected — do not propose them or close variants:\n${rejected.map((r) => `  ${r}`).join('\n')}`
       : '',
@@ -662,15 +668,42 @@ function detectAi() {
   return AI_CLIS.find((c) => commandExists(c.bin)) ?? null;
 }
 
-// spawnSync would freeze the terminal for the 6-8 seconds these CLIs take to
-// boot, with no sign of life. Async plus an elapsed counter is the difference
+// These CLIs are agents, not text transformers: run one inside a repository and
+// it reads CLAUDE.md, the source and the git history, then names the branch
+// after what it found instead of what the user asked for. Measured in this very
+// repository — description "uiのバグの修正", three runs each:
+//
+//   cwd = the repo   feat/ui-bug-fix, fix/ui-display-bug, feat/ui-bug-fix
+//   cwd = empty dir  fix/ui-display-bug, fix/ui-display-bug, fix/ui-display-bug
+//
+// In-repo it both wavered and picked `feat/` for a bug fix twice. It once
+// answered `feat/naming-prompt-repo-context`, which is a phrase straight out of
+// this repo's CLAUDE.md. Everything the model legitimately needs is already in
+// the prompt, so it runs in an empty directory and is given nothing else.
+//
+// spawnSync would also freeze the terminal for the 6-8 seconds these CLIs take
+// to boot, with no sign of life; async plus an elapsed counter is the difference
 // between "working" and "hung".
 function runAi(ai, prompt) {
   return new Promise((resolve) => {
+    let sandbox = '';
+    try {
+      sandbox = mkdtempSync(joinPath(tmpdir(), 'gwqadd-ai-'));
+    } catch { /* fall back to inheriting cwd rather than not answering at all */ }
+    const cleanup = () => {
+      if (!sandbox) return;
+      try { rmSync(sandbox, { recursive: true, force: true }); } catch { /* ignore */ }
+      sandbox = '';
+    };
+
     let child;
     try {
-      child = spawn(ai.bin, [...ai.args, prompt], { stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn(ai.bin, [...ai.args, prompt], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        ...(sandbox ? { cwd: sandbox } : {}),
+      });
     } catch (err) {
+      cleanup();
       return resolve({ ok: false, out: '', err: String(err?.message ?? err) });
     }
     let out = '';
@@ -680,10 +713,12 @@ function runAi(ai, prompt) {
     const kill = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, 60_000);
     child.on('error', (e) => {
       clearTimeout(kill);
+      cleanup();
       resolve({ ok: false, out: '', err: String(e?.message ?? e) });
     });
     child.on('close', (code) => {
       clearTimeout(kill);
+      cleanup();
       resolve({ ok: code === 0, out, err });
     });
   });
