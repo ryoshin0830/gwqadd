@@ -1,0 +1,42 @@
+{
+  "name": "gwqadd",
+  "version": "0.1.0",
+  "description": "Create a branch and its gwq worktree in the repository you are in, and cd there.",
+  "type": "module",
+  "bin": {
+    "gwqadd": "bin/gwqadd.mjs"
+  },
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "files": [
+    "bin",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "gwq",
+    "git",
+    "worktree",
+    "branch",
+    "cd",
+    "zsh",
+    "bash",
+    "fish",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "ryoshin0830",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryoshin0830/gwqadd.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ryoshin0830/gwqadd/issues"
+  },
+  "homepage": "https://github.com/ryoshin0830/gwqadd#readme",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "prepublishOnly": "npm test && npm pack --dry-run && node bin/gwqadd.mjs --help"
+  }
+}
