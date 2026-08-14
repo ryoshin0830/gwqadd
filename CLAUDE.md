@@ -147,6 +147,17 @@ The lookup MUST be PATH-only (`whence -p` / `type -P` / `command -s`) — the
 function shares its name with the binary, so a function-aware lookup recurses
 until the shell dies.
 
+### I8b. The function must not capture output that is not a path
+
+Every flag whose result goes to stdout has to be passed through uncaptured:
+`-h`, `--help`, `-V`, `--version`, `--init`, `--json`. The wrapper adds
+`--quiet`, so `--json` would additionally collide with it and error out.
+
+This shipped broken in every one of these packages and was only found by running
+the emitted function rather than syntax-checking it — `zsh -n` is perfectly happy
+with a function that cds into a help page. There are tests now that install the
+function in zsh, bash and fish and run `--version` and `--help` through it.
+
 ### I9. Validate the branch name before touching anything
 
 `git check-ref-format --branch` runs before any state changes, so a typo like
