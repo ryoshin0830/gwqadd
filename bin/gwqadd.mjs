@@ -941,9 +941,36 @@ function copyToClipboard(text) {
 
 // ── worktree creation ────────────────────────────────────────────────────────
 
-// gwq reports the git command it ran, so a collision's destination can be read
-// back out of its error text.
-const COLLISION = /git worktree add (?:-b [^ ]* )?(\/[^ :]*)/;
+// A collision's destination has to be recovered from gwq's error text. Two
+// sources, in order of reliability:
+//
+//   fatal: '<path>' already exists            <- git, quoted, unambiguous
+//   ...: git worktree add [-b <branch>] <path>: ...
+//
+// The quoted form is preferred because the command echo is not parseable in
+// general: `-b` swaps the argument order (`add -b <branch> <path>` versus
+// `add <path> <branch>`), and a path containing a space silently truncated the
+// old pattern — a gwq basedir under a directory with a space made `-f` do
+// nothing at all, without saying so.
+const COLLISION_QUOTED = /fatal: '([^']+)' already exists/;
+
+// The command echo needs to know which form was used, because `-b` swaps the
+// argument order and both a path and a branch can follow `add`:
+//
+//   gwq add -b <branch>      ->  git worktree add -b <branch> <path>: …
+//   gwq add <branch>         ->  git worktree add <path> <branch>: …
+//
+// Guessing cost real time once already: a pattern that stopped at the first
+// space read the path-first form correctly by accident, and a pattern that ran
+// to the colon swallowed the branch with it.
+const collisionFromCmd = (out, withB) => (withB
+  ? out.match(/git worktree add -b \S+ (.+?): /)
+  : out.match(/git worktree add (.+?) \S+: /))?.[1];
+
+function collisionPath(out, withB) {
+  const quoted = out.match(COLLISION_QUOTED)?.[1];
+  return (quoted ?? collisionFromCmd(out, withB) ?? '').trim();
+}
 
 function timestamp() {
   const d = new Date();
@@ -1054,7 +1081,7 @@ async function main() {
   };
 
   if (status !== 0) {
-    const collide = out.match(COLLISION)?.[1] ?? '';
+    const collide = collisionPath(out, addArgs[0] === '-b');
     // gwq's own -f does not reach `git worktree add` (verified against v0.1.1),
     // so a collision has to be cleared here or not at all.
     if (collide && existsSync(collide) && force) {

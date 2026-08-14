@@ -100,9 +100,14 @@ With `-f` a non-empty destination is **renamed** to `<path>.bak-<timestamp>`.
 Without `-f` it is left alone and the error names it, counts its entries, and
 points at `-f`. Never `rm` a collision.
 
-The destination is recovered from gwq's error text via the `COLLISION` regex.
-If gwq changes its error format the regex stops matching and `-f` silently stops
-working — the `-f` test is what catches that.
+The destination is recovered from gwq's error text: git's quoted
+`fatal: '<path>' already exists` first, then the command echo — which must be
+told whether `-b` was used, since that swaps the argument order.
+
+Two failures already lived here: a pattern stopping at the first space silently
+broke `-f` for any gwq basedir under a directory with a space, and a pattern
+running to the colon swallowed the branch name. Both orders and both spacings
+are tested.
 
 After moving the collision aside, the retry must check whether the first attempt
 already left the branch behind (G3) and drop `-b` if so, or git refuses to

@@ -62,13 +62,15 @@ if [ "$newbranch" = "1" ]; then
   # failure leaves the branch behind.
   git branch "$branch" HEAD >/dev/null 2>&1
   if [ -e "$wt" ] && [ -n "$(ls -A "$wt" 2>/dev/null)" ]; then
-    echo "Error: failed to add worktree: git worktree add -b $branch $wt: fatal: '$wt' already exists" >&2
+    echo "Error: failed to add worktree: git worktree add -b $branch $wt: Preparing worktree" >&2
+    echo "fatal: '$wt' already exists" >&2
     exit 1
   fi
   git worktree add "$wt" "$branch" >/dev/null 2>&1 || exit 1
 else
   if [ -e "$wt" ] && [ -n "$(ls -A "$wt" 2>/dev/null)" ]; then
-    echo "Error: failed to add worktree: git worktree add $wt $branch: fatal: '$wt' already exists" >&2
+    echo "Error: failed to add worktree: git worktree add $wt $branch: Preparing worktree" >&2
+    echo "fatal: '$wt' already exists" >&2
     exit 1
   fi
   git worktree add "$wt" "$branch" >/dev/null 2>&1 || exit 1
@@ -466,4 +468,27 @@ test('modified paths survive porcelain quirks (first line, rename, quoting)', ()
   // "simplifies" this back to gitOut().
   const viaTrim = porcelain.trim().split('\n').map((l) => l.slice(3).trim());
   assert.equal(viaTrim[0], '.txt', 'trimming the stream eats the first path character');
+});
+
+test('collision paths parse in both argument orders, spaces and all', () => {
+  // `-b` swaps the order, and a gwq basedir under a directory with a space
+  // silently broke `-f` entirely: the pattern stopped at the first space, so
+  // the path it produced did not exist and the move-aside was skipped without
+  // a word. Both forms, with and without spaces, plus git's quoted line.
+  const parse = (out, withB) => {
+    const quoted = out.match(/fatal: '([^']+)' already exists/)?.[1];
+    const cmd = (withB
+      ? out.match(/git worktree add -b \S+ (.+?): /)
+      : out.match(/git worktree add (.+?) \S+: /))?.[1];
+    return (quoted ?? cmd ?? '').trim();
+  };
+  assert.equal(parse('x: git worktree add -b feat/x /wt/feat-x: Preparing', true), '/wt/feat-x');
+  assert.equal(parse('x: git worktree add /wt/feat-x feat/x: Preparing', false), '/wt/feat-x');
+  assert.equal(parse('x: git worktree add -b feat/x /a b/feat-x: Preparing', true), '/a b/feat-x');
+  assert.equal(parse('x: git worktree add /a b/feat-x feat/x: Preparing', false), '/a b/feat-x');
+  assert.equal(parse("fatal: '/a b/feat-x' already exists", false), '/a b/feat-x');
+  // The old pattern is what this guards against.
+  assert.equal('x: git worktree add -b feat/x /a b/feat-x: p'
+    .match(/git worktree add (?:-b [^ ]* )?(\/[^ :]*)/)?.[1], '/a',
+    'the superseded pattern truncated at the space');
 });
