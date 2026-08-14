@@ -15,7 +15,8 @@ A Node.js CLI (~750 lines, zero runtime dependencies) that creates a branch and
 its worktree in whatever repository the user is standing in:
 
 1. Resolve the repository from cwd (any worktree of it will do).
-2. Take the branch name from the positional, or ask for it.
+2. Take the branch name from the positional, or from one question plus an
+   AI suggestion the user confirms (interactive only).
 3. Create branch + worktree, or just the worktree, or neither.
 4. `git submodule update --init --recursive` when `.gitmodules` exists.
 5. Print the path; `--init <shell>` emits a function so the *shell* cds.
@@ -227,33 +228,52 @@ must never be able to block the user from naming a branch.
 `parseCandidates()` strips bullets, numbering and quotes, drops anything with
 whitespace or characters git would reject, and then runs
 `git check-ref-format --branch` on each survivor. Only names git has already
-accepted are ever offered.
+accepted are ever offered, and nothing is created until the user confirms.
 
-If the model ignores the requested prefix, its words are still reused but the
-shape is ours (`<prefix>/<its-last-segment>`). And the user always picks —
-there is no path where a suggestion is accepted automatically.
+Three candidates are requested but only the first valid one is shown. The spares
+exist so a malformed leader does not cost a 7-second round trip; they are not
+offered as a menu, because the agreed UX is one name and one confirmation.
 
-### I18. The type menu comes from the repository, not from a spec
+### I18. The prompt carries the repository, so there is no type menu
 
-`branchPrefixes()` reads `git for-each-ref` and ranks the prefixes actually in
-use; the Conventional Commits list only fills the remaining slots. A repo that
-says `feature/` must never be offered `feat/` first.
+An earlier version made the user pick a prefix from a list. That was the wrong
+division of labour: if an AI is being asked anyway, it can read the convention
+too. `repoContext()` gathers prefix counts, example branch names, the repo name,
+the base ref, and the dirty paths, and `namingPrompt()` tells the model to pick
+a prefix the repo already uses. Verified: in a repo using `bugfix/`, a Japanese
+description produced `bugfix/expired-session-accepted` — not `fix/…`.
 
-Local and origin copies of the same branch are deduped before counting, or
-every branch would score twice.
+Do not reintroduce the menu. If the model picks badly, improve the prompt.
 
-The menu is keyed by **numbers**, not mnemonic letters: `feat` and `fix` both
-want `f`, and the entries are not known until the repo is read.
+### I19. One confirmation, and "no" goes back to the description
 
-### I13. Raw mode cleanup
+`confirmCreate()` is the only checkpoint. `n` returns to the description prompt
+— not to a candidate list — and every name from the rejected round is passed to
+the next prompt as an exclusion, so the model cannot answer with the same thing.
+`e` edits the suggestion in place, which costs no extra step and saves a round
+trip when a name is one word off.
 
-`setRawMode(true)` is guarded by `stdin.isTTY`. Cleanup runs on `exit`,
-`SIGTERM`, `SIGHUP`, `uncaughtException`, and inside `try/finally`. Cursor
-restore is guarded by `stderr.isTTY`.
+### I20. Never trim a stream you are going to parse by column
 
-### I14. Engines
+`gitOut()` ends in `.trim()`, which is right for `rev-parse` and fatal for
+`git status --porcelain`: it eats the leading space of the **first** line only,
+so `slice(3)` then takes the first character of that path with it. ` M a.txt`
+became `.txt` while every later line was fine — the kind of bug that survives
+casual testing because it looks like a plausible filename.
 
-`engines.node >= 20.12.0` for `node:util` `parseArgs`. Do not lower.
+The porcelain parse therefore uses `git()` directly, and handles ` -> ` renames
+and `"quoted paths"`. There is a regression test that also asserts the broken
+behaviour of the trimmed version, so nobody simplifies it back.
+
+### I21. The naming layer never blocks
+
+Every failure — CLI missing, non-zero exit, unparseable output, no usable
+candidate — falls through to `typeItYourself()`. That prompt rejects non-ASCII
+input rather than slugifying it: a user who was mid-way through describing work
+in Japanese will type Japanese there, and git would happily create a branch
+named in Japanese that no CI, URL or completion wants. The message points at the
+two things that do work — describe it at the previous prompt, or pass a name as
+an argument to use it verbatim.
 
 ---
 
@@ -325,17 +345,17 @@ Not covered — run by hand:
 
 | Scenario | Command | Expect |
 | --- | --- | --- |
-| Type menu | `gwqadd` in a repo with history | repo's own prefixes first, with counts |
-| Manual naming | `gwqadd`, pick a type, empty description | asks for the slug, slugifies it |
-| AI naming | `gwqadd`, pick a type, describe in Japanese | 3 ASCII candidates in the repo's style |
-| AI counter | during the above | elapsed seconds tick, then the line clears |
-| Regenerate | at the candidate list, press `r` | asks again, new candidates |
-| Edit out | at the candidate list, press `e` | falls through to typing it yourself |
-| Cancel | Esc at either picker | exit 130, nothing created |
-| No AI installed | `PATH=/usr/bin:/bin gwqadd` | skips straight to typing it yourself |
-| AI broken | `GWQADD_AI=false gwqadd` | warns, falls through to typing it yourself |
+| The whole flow | `gwqadd`, describe work, `Y` | one suggestion, one confirm, created |
+| House style | in a repo using `bugfix/` | the suggestion uses `bugfix/`, not `fix/` |
+| Reject | at the confirm, press `n` | back to the description; the old name never returns |
+| Edit | at the confirm, press `e` | prompt pre-filled with the suggestion |
+| Cancel | Esc at either prompt | exit 130, nothing created |
+| Dirty tree | modify files first | their paths reach the prompt, and the name reflects them |
+| No AI installed | `PATH=/usr/bin:/bin gwqadd` | straight to the ASCII-name prompt |
+| AI broken | `GWQADD_AI=false gwqadd` | warns, falls through to that prompt |
 | AI disabled | `gwqadd --no-ai` | no description prompt at all |
-| Messy model output | `GWQADD_AI='printf "- \`feat/a\`\nhere you go:\nfeat/b\n"' gwqadd` | offers `feat/a`, `feat/b` only |
+| Non-ASCII fallback | at the ASCII prompt, type Japanese | refused with advice, not slugified |
+| Messy model output | `GWQADD_AI='printf %s\\n 1)\\ feat/a'` | the numbering is stripped |
 | Real gwq layout | `gwqadd feat/x` in a ghq repo | lands under gwq's `worktree.basedir` |
 | `--expires` | `gwqadd tmp/x --expires 1h` | gwq records the expiry |
 | Submodules | in a repo with submodules | submodules populated |
@@ -357,9 +377,10 @@ Not covered — run by hand:
 
 ## Things that are intentionally NOT here
 
-- **An fzf picker.** The two things that need choosing — the type and the
-  suggestion — are short numbered lists a single keypress handles. Staying
-  fzf-free keeps this the one tool in the family with no finder dependency.
+- **An fzf picker, or any picker.** There is exactly one choice left in the flow
+  and it is Y/n/e. Staying finder-free keeps this the one tool in the family with
+  no fzf dependency.
+- **A type menu.** Removed deliberately; see I18.
 - **An embedded LLM client, or a bundled API key.** See I16. If someone asks for
   "just add Groq", the answer is `GWQADD_AI='<their own command>'`.
 - **Caching AI suggestions.** They are cheap, and a stale suggestion for a

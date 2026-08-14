@@ -45,11 +45,11 @@ Always pass `-n` and `--json`, and always pass `--from`.
 gwqadd -n --json --from <base> <branch>
 ```
 
-Or, pinned (`^0.1`, NOT `@latest`, so a future major bump does not silently
+Or, pinned (`^0.3`, NOT `@latest`, so a future major bump does not silently
 break the flow):
 
 ```bash
-npx -y gwqadd@^0.1 -n --json --from <base> <branch>
+npx -y gwqadd@^0.3 -n --json --from <base> <branch>
 ```
 
 `-n` matters: without it the tool prints a path meant for a shell function to
@@ -77,7 +77,7 @@ branch was cut from.
 
 Run without a branch name and without a TTY, gwqadd exits 1 (`E_VALIDATION`) —
 it does **not** prompt, and it does **not** invoke an AI. That is deliberate:
-the type menu and the AI-suggested names exist for a human at a terminal.
+the describe-and-confirm flow exists for a human at a terminal.
 
 So always pass the branch name. You are the one naming it; if you want ideas,
 generate them yourself and pass the result. Do not try to reach the naming flow

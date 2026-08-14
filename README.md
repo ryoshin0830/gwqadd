@@ -16,7 +16,7 @@ Create a branch and its [gwq](https://github.com/d-kuro/gwq) worktree in the rep
 One command instead of: `git checkout -b` → realise you wanted a worktree →
 `gwq add -b` → find where it landed → `cd`.
 
-Run it with no branch name and it helps you pick one:
+Run it with no branch name and it asks one question:
 
 ```console
 ~/ghq/github.com/you/api $ gwqadd
@@ -24,26 +24,16 @@ Run it with no branch name and it helps you pick one:
 │ repo    api /Users/you/ghq/github.com/you/api
 │ base    main 8f2c1a9
 │
-│ type?
-│   1) feat/ (12)   2) fix/ (7)   3) chore/ (2)
-│   4) docs/   5) refactor/   6) test/
-│   7) perf/
-│   0) no prefix   o) type your own
-│ > 1
+│ what do you want to do? (any language)
+│ > セッションが期限切れでも通ってしまう不具合を直す
 │
-│ what are you doing? (any language — Enter alone to name it yourself)
-│ > ログイン画面で連打するとセッションが壊れる
-│
-│  1) feat/login-rapid-click-session
-│  2) feat/login-double-submit-guard
-│  3) feat/prevent-session-corruption
-│  e) type it yourself   r) regenerate
-│ > 1
-└ ✓ feat/login-rapid-click-session → …
+│ bugfix/expired-session-accepted   off main
+│ create it? [Y]es · [n]o, describe again · [e]dit the name
+└ ✓ bugfix/expired-session-accepted → …
 ```
 
-The type list is built from the prefixes **this repository actually uses**, so a
-repo that says `feature/` is never offered `feat/`.
+No type menu, no list to choose from. Note the prefix: this repository uses
+`bugfix/`, not `fix/`, and the suggestion followed it without being told.
 
 ## Install
 
@@ -107,37 +97,43 @@ gwqadd feat/logout --from main
 
 ## Naming help
 
-Two layers, and the first needs no network at all.
+One question, one confirmation:
 
-**The type menu** is derived from `git for-each-ref` — the prefixes this
-repository already uses come first, with their counts, and the Conventional
-Commits types fill out the rest. Pick `o` to type a prefix of your own, or `0`
-for none.
+| key | |
+| --- | --- |
+| `Y` / Enter | create it |
+| `n` | describe the work again — the rejected name is excluded next time |
+| `e` | edit the suggested name in place |
+| Esc | give up, create nothing |
 
-**The suggestions** come from whichever AI CLI is already on your `PATH`:
+**Why the suggestions fit.** The prompt is not just your sentence. It carries:
+
+- this repository's branch prefixes with their counts, so the AI picks the one
+  you actually use — `feature/` over `feat/`, `bugfix/` over `fix/`;
+- up to 20 existing branch names, for wording and length;
+- the repository name and the ref being branched from;
+- the paths you have already modified, if the working tree is dirty — often the
+  clearest signal about what the work is.
+
+**The AI** is whichever of these is on your `PATH`:
 
 ```
 claude -p    →    codex exec    →    opencode run    →    gemini -p
 ```
 
-There is no API key to obtain and no account to create — it uses what you
-already have, and bills to whatever you already pay for. Expect 6–8 seconds,
-almost all of it the CLI's own start-up; an elapsed counter runs while it works.
-
-Because the prompt includes a sample of the repository's existing branch names,
-the suggestions match your house style rather than a generic template. Describe
-the work in any language; the names come back in ASCII.
+No API key to obtain, no account to create — it uses what you already have.
+Expect 6–8 seconds, almost all of it the CLI's own start-up; an elapsed counter
+runs while it works.
 
 | | |
 | --- | --- |
 | pick a different CLI | `--ai 'gemini -p'`, or `GWQADD_AI='gemini -p'` |
-| turn it off | `--no-ai`, or `GWQADD_AI=off` |
-| skip it for one run | press Enter on an empty description |
+| turn it off | `--no-ai`, or `GWQADD_AI=off` — leaves a plain ASCII-name prompt |
 
-**What is sent, and when.** Nothing leaves your machine until you type a
-description. At that point the description, the chosen prefix and up to 15
-existing branch names from the repository are passed to that CLI. A suggestion
-is never accepted for you — you always pick, edit or regenerate.
+**What is sent, and when.** Nothing leaves your machine until you answer the
+question. At that point the sentence, the repository name, its branch names and
+your modified file *paths* (never contents) go to that CLI. Nothing is created
+until you confirm.
 
 None of this happens when you pass a branch name on the command line, or when
 there is no terminal. Scripts and agents keep the plain, silent contract.
@@ -184,7 +180,7 @@ gwqadd [options] [<branch>]
 | `-h`, `--help` | show help |
 | `-V`, `--version` | show version |
 
-Run it with no branch name and it walks you through the naming help above.
+Run it with no branch name and it asks what you want to do, then confirms once.
 
 ## For scripts and AI agents
 

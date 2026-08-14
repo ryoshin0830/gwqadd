@@ -443,3 +443,27 @@ test('--help documents the naming help and how to turn it off', () => {
   assert.match(h, /--no-ai/);
   assert.match(h, /claude, codex, opencode, gemini/);
 });
+
+// The prompt is assembled from git output, and one of those parses was wrong in
+// a way only visible by reading the prompt itself: `gitOut` trims the whole
+// string, so porcelain's first line lost its leading space and then its first
+// path character. The AI path cannot be reached without a TTY, so drive the
+// same parse through a stand-in and assert on what it produced.
+test('modified paths survive porcelain quirks (first line, rename, quoting)', () => {
+  // Recorded from git: a quoted path, a rename, and a plain entry. The first
+  // line is the one that used to arrive as ".txt" instead of "a.txt".
+  const porcelain = ' M a.txt\n A "has space.txt"\nRM old.txt -> renamed.txt\n A src/auth/session.ts\n';
+  const parsed = porcelain
+    .split('\n')
+    .filter((l) => l.length > 3)
+    .map((l) => l.slice(3))
+    .map((l) => (l.includes(' -> ') ? l.slice(l.indexOf(' -> ') + 4) : l))
+    .map((l) => l.replace(/^"(.*)"$/, '$1').trim())
+    .filter(Boolean);
+  assert.deepEqual(parsed, ['a.txt', 'has space.txt', 'renamed.txt', 'src/auth/session.ts']);
+
+  // And the bug itself: prove trimming the stream is what broke it, so nobody
+  // "simplifies" this back to gitOut().
+  const viaTrim = porcelain.trim().split('\n').map((l) => l.slice(3).trim());
+  assert.equal(viaTrim[0], '.txt', 'trimming the stream eats the first path character');
+});
