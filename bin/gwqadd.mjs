@@ -479,8 +479,6 @@ process.on('uncaughtException', (err) => {
 });
 
 async function waitForKey() {
-  process.stdin.removeAllListeners('data');
-  process.stdin.removeAllListeners('keypress');
   try {
     process.stdin.setRawMode(true);
     rawModeEngaged = true;
@@ -519,6 +517,9 @@ async function askLine(question, initial = '') {
     const answer = rl.question(question);
     if (initial) rl.write(initial);
     return (await answer).trim();
+  } catch (err) {
+    if (err?.code === 'ABORT_ERR') die('E_INTERRUPTED', 'cancelled');
+    throw err;
   } finally {
     rl.close();
   }
