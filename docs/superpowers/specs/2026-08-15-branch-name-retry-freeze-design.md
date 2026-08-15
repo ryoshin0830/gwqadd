@@ -29,6 +29,11 @@ only the listener it owns. Remove the blanket `removeAllListeners()` calls.
 The function already removes its own `data` handler immediately after receiving
 a key, so no additional cleanup mechanism is required.
 
+Once input delivery is restored, Node readline reports Ctrl-C by rejecting the
+pending `question()` with `ABORT_ERR`. `askLine()` will translate that rejection
+to gwqadd's existing `E_INTERRUPTED` path so the documented exit status remains
+130 instead of falling through to the generic uncaught-exception handler.
+
 This is preferred over keeping one readline interface alive for the whole flow,
 which would require a broader interaction refactor, and over adding a prompt
 library, which would violate the zero-runtime-dependency invariant.
