@@ -394,6 +394,76 @@ function canaryAi() {
   return { dir, bin, marker, called: () => existsSync(marker) };
 }
 
+function runInteractiveExpect(lines, ai) {
+  const script = join(sandbox, 'interactive.exp');
+  writeFileSync(script, [
+    'set timeout 5',
+    'set node [lindex $argv 0]',
+    'set bin [lindex $argv 1]',
+    'spawn $node $bin --no-cd',
+    ...lines,
+  ].join('\n') + '\n');
+  const env = {
+    ...process.env,
+    PATH: `${shimDir}:${process.env.PATH}`,
+    NO_COLOR: '1',
+    GWQADD_AI: ai.bin,
+  };
+  delete env.FORCE_COLOR;
+  return spawnSync('expect', [script, process.execPath, BIN], {
+    cwd: repo,
+    env,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+}
+
+test('n and e return to responsive line prompts', (t) => {
+  if (spawnSync('expect', ['-v'], { stdio: 'ignore' }).error) {
+    return t.skip('expect not installed');
+  }
+  const ai = canaryAi();
+  t.after(() => rmSync(ai.dir, { recursive: true, force: true }));
+  const r = runInteractiveExpect([
+    'expect "what do you want to do?"',
+    'send -- "first description\\r"',
+    'expect "create it?"',
+    'send -- "n"',
+    'expect "what do you want to do?"',
+    'send -- "second description\\r"',
+    'expect "create it?"',
+    'send -- "e"',
+    'expect "branch name (ascii):"',
+    'send -- "\\025fix/edited-name\\r"',
+    'expect eof',
+    'set result [wait]',
+    'exit [lindex $result 3]',
+  ], ai);
+  assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+  assert.equal(branchExists('fix/edited-name'), true);
+});
+
+test('Ctrl-C after edit exits 130', (t) => {
+  if (spawnSync('expect', ['-v'], { stdio: 'ignore' }).error) {
+    return t.skip('expect not installed');
+  }
+  const ai = canaryAi();
+  t.after(() => rmSync(ai.dir, { recursive: true, force: true }));
+  const r = runInteractiveExpect([
+    'expect "what do you want to do?"',
+    'send -- "description\\r"',
+    'expect "create it?"',
+    'send -- "e"',
+    'expect "branch name (ascii):"',
+    'send -- "\\003"',
+    'expect eof',
+    'set result [wait]',
+    'exit [lindex $result 3]',
+  ], ai);
+  assert.equal(r.status, 130, `${r.stdout}\n${r.stderr}`);
+  assert.equal(branchExists('feat/a'), false, 'interrupt creates nothing');
+});
+
 test('a branch name on the command line never reaches the AI', () => {
   const ai = canaryAi();
   const r = spawnSync(process.execPath, [BIN, '--json', '-n', 'feat/explicit'], {
