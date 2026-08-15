@@ -379,10 +379,10 @@ test('a missing gwq exits 127 with the brew command', () => {
 
 // ── the naming layer ─────────────────────────────────────────────────────────
 //
-// The interactive flow itself cannot be driven from here: macOS `script` calls
-// tcgetattr on its own stdin and fails under a pipe, and a real pty would mean
-// a dependency. What IS testable — and is the part that would be dangerous to
-// get wrong — is that none of it engages without a terminal.
+// Real interactive coverage below is conditional on the system `expect` tool
+// and skips cleanly when it is unavailable. What IS testable — and is the part
+// that would be dangerous to get wrong — is that none of it engages without a
+// terminal.
 
 // An "AI" that records every invocation, so its absence is provable.
 function canaryAi() {
