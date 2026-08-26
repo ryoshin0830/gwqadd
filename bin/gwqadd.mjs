@@ -35,6 +35,8 @@ OPTIONS
   --expires <dur>    hand gwq an expiry (1h, 7d, …) for a throwaway worktree
   --ai <cmd>         AI CLI used to suggest names (default: autodetected)
   --no-ai            never ask an AI, even when one is installed
+  --random           skip the questions and generate a name
+  --no-random        start by describing the work instead of rolling a name
   --no-submodules    skip \`git submodule update --init --recursive\`
   -f, --force        move a colliding worktree directory aside instead of failing
   -n, --no-cd        do the work and report the path, but do not move the shell
@@ -48,12 +50,19 @@ EXAMPLES
   ${PKG} feat/login                  branch off HEAD, worktree, cd
   ${PKG} feat/login --from main      branch off main wherever you happen to be
   ${PKG} hotfix/x --expires 1d       gwq will mark it expired after a day
-  ${PKG}                             describe the work, confirm, done
+  ${PKG}                             roll a name, confirm, done
+  ${PKG} --random                    roll a name for a script, no questions
   ${PKG} -n --json feat/login        machine-readable, shell stays put
 
 NAMING HELP
-  Run ${PKG} with no branch name and it asks one question — what you want to do,
-  in any language. An AI CLI turns that into a branch name and you confirm once:
+  Run ${PKG} with no branch name and it rolls one immediately — three words, no
+  prefix, no waiting:
+
+    Y  create it     n  name it properly     e  edit the name     r  reroll
+
+  Nothing has been sent anywhere and nothing created at that point. Press n and
+  it asks what you want to do, in any language, and hands that to an AI CLI
+  which answers with one name in this repository's own style:
 
     Y  create it        n  describe it again        e  edit the name
 
@@ -67,6 +76,10 @@ NAMING HELP
   and nothing is created until you confirm. Override with --ai '<cmd>' or
   GWQADD_AI='<cmd>'; disable with --no-ai or GWQADD_AI=off, which leaves a plain
   prompt for an ASCII name.
+
+  --no-random (or GWQADD_RANDOM=off) starts at the description prompt instead.
+  --random goes the other way and never asks; it is the only naming path that
+  works without a terminal, which is what scripts and agents should use.
 
   None of this happens with a branch name on the command line, or without a
   terminal — scripts and agents keep the plain, silent contract.
@@ -1005,13 +1018,16 @@ async function typeItYourself(initial = '') {
 
 // The single checkpoint before anything is created. `n` sends the user back to
 // describing the work, which is what they asked for; `e` is there because a
-// suggestion that is one word off should not cost another round trip.
-async function confirmCreate(name, base) {
+// suggestion that is one word off should not cost another round trip; `r` only
+// appears for a random name, where rerolling costs nothing at all.
+async function confirmCreate(name, base, { reroll = false } = {}) {
   log(`${dim('│')}`);
   log(`${dim('│')} ${bold(cyan(name))}   ${dim(`off ${base}`)}`);
+  const no = reroll ? '[n]o, name it properly' : '[n]o, describe again';
+  const extra = reroll ? `${dim('·')} ${dim('[r]eroll')} ` : '';
   stderr.write(
-    `${dim('│')} create it? ${dim('[Y]es')} ${dim('·')} ${dim('[n]o, describe again')} ` +
-    `${dim('·')} ${dim('[e]dit the name')} `,
+    `${dim('│')} create it? ${dim('[Y]es')} ${dim('·')} ${dim(no)} ` +
+    `${dim('·')} ${dim('[e]dit the name')} ${extra}`,
   );
   for (;;) {
     const buf = await waitForKey();
@@ -1020,12 +1036,38 @@ async function confirmCreate(name, base) {
     if (c === 0x79 || c === 0x59 || c === 0x0d || c === 0x0a) { stderr.write('\n'); return { create: true }; }
     if (c === 0x6e || c === 0x4e) { stderr.write('\n'); return { again: true }; }
     if (c === 0x65 || c === 0x45) { stderr.write('\n'); return { edit: true }; }
+    if (reroll && (c === 0x72 || c === 0x52)) { stderr.write('\n'); return { reroll: true }; }
+  }
+}
+
+// The fast half of the naming layer: a name appears with no prompt, no
+// subprocess and no network, and the expensive path costs one keystroke.
+// Returns null when the user wants to describe the work to an AI instead.
+async function offerRandom(dir, baseRef) {
+  for (;;) {
+    const name = freeRandomName(dir);
+    if (!name) {
+      warn(`could not find an unused random name in ${RANDOM_TRIES} tries — name it yourself instead`);
+      return { branch: await typeItYourself(), named: 'manual' };
+    }
+    const choice = await confirmCreate(name, baseRef, { reroll: true });
+    if (choice.create) return { branch: name, named: 'random' };
+    if (choice.edit) return { branch: await typeItYourself(name), named: 'manual' };
+    if (choice.reroll) continue;
+    return null; // `n` — fall through to describing the work
   }
 }
 
 // The whole interactive path. Returns a branch name git has already accepted;
 // never runs unless there is a terminal and no positional was given.
 async function composeBranchName(dir, repo, base) {
+  // Random first: it is free, and a user who wanted to think about the name is
+  // one keystroke away from the prompt that lets them.
+  if (randomFirst || values.random) {
+    const chosen = await offerRandom(dir, base.ref);
+    if (chosen) return chosen;
+  }
+
   const ai = detectAi();
   if (!ai) return { branch: await typeItYourself(), named: 'manual' };
 

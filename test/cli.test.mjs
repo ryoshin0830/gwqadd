@@ -712,3 +712,44 @@ test('a random name is skipped when a worktree holds it', () => {
   gitTry(repo, 'branch', '-D', 'bb-humming-owl');
   rmSync(root, { recursive: true, force: true });
 });
+
+test('--no-random leaves the non-interactive contract exactly as it was', () => {
+  const ai = canaryAi();
+  const r = spawnSync(process.execPath, [BIN, '--no-random', '--json'], {
+    encoding: 'utf8',
+    cwd: repo,
+    env: {
+      ...process.env, PATH: `${shimDir}:${process.env.PATH}`,
+      NO_COLOR: '1', GWQADD_AI: ai.bin, FORCE_COLOR: undefined,
+    },
+  });
+  const called = ai.called();
+  rmSync(ai.dir, { recursive: true, force: true });
+  assert.equal(r.status, 1);
+  assert.equal(jsonLine(r.stderr).error.code, 'E_VALIDATION');
+  assert.equal(called, false);
+});
+
+test('GWQADD_RANDOM=off is accepted and changes nothing non-interactively', () => {
+  const env = {
+    ...process.env, PATH: `${shimDir}:${process.env.PATH}`,
+    NO_COLOR: '1', GWQADD_RANDOM: 'off',
+  };
+  delete env.FORCE_COLOR;
+  const r = spawnSync(process.execPath, [BIN, '--json', '-n', 'feat/env-off'], {
+    encoding: 'utf8', cwd: repo, env,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.equal(j.branch, 'feat/env-off');
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  spawnSync('git', ['-C', repo, 'branch', '-D', 'feat/env-off']);
+});
+
+test('--help documents the random path and how to turn it off', () => {
+  const h = run(['--help']).stdout;
+  assert.match(h, /--random/);
+  assert.match(h, /--no-random/);
+  assert.match(h, /GWQADD_RANDOM/);
+  assert.match(h, /reroll/);
+});
