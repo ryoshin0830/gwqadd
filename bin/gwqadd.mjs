@@ -752,10 +752,16 @@ const RANDOM_TRIES = 10;
 // check has to happen before the name is shown, so the confirmation prompt can
 // never offer something that cannot be created (I24). Ten failures in a
 // 9,582,408-name space means our randomness is broken, not the user's luck.
+//
+// The branch check alone is enough, and a `worktreePath()` call beside it would
+// be unreachable: `git worktree list --porcelain` only prints `branch
+// refs/heads/<name>` for a worktree that has that branch checked out, and a
+// worktree with no branch prints `detached` instead. So a name a worktree holds
+// is always a name a branch holds. Verified against git before this was cut.
 function freeRandomName(dir) {
   for (let i = 0; i < RANDOM_TRIES; i++) {
     const name = randomName();
-    if (!hasLocalBranch(dir, name) && !worktreePath(dir, name)) return name;
+    if (!hasLocalBranch(dir, name)) return name;
   }
   return '';
 }

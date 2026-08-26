@@ -631,3 +631,84 @@ test('an explicit branch name reports named=argument', () => {
   spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
   spawnSync('git', ['-C', repo, 'branch', '-D', 'feat/named-arg']);
 });
+
+// Shrinking the word lists in a *copy* of the CLI is how the reroll gets a
+// deterministic test without a test-only hook in the shipped code. The copy
+// needs a package.json one directory up, because bin/gwqadd.mjs reads its
+// version from `new URL('../package.json', import.meta.url)`.
+function cliWithWords(adj, ger, noun) {
+  const root = mkdtempSync(join(tmpdir(), 'gwqadd-words-'));
+  mkdirSync(join(root, 'bin'));
+  copyFileSync(join(dirname(BIN), '..', 'package.json'), join(root, 'package.json'));
+  const literal = (a) => `[${a.map((w) => `'${w}'`).join(', ')}]`;
+  const src = source
+    .replace(/const ADJECTIVES = \[[^\]]*\]/, `const ADJECTIVES = ${literal(adj)}`)
+    .replace(/const GERUNDS = \[[^\]]*\]/, `const GERUNDS = ${literal(ger)}`)
+    .replace(/const NOUNS = \[[^\]]*\]/, `const NOUNS = ${literal(noun)}`);
+  const bin = join(root, 'bin', 'gwqadd.mjs');
+  writeFileSync(bin, src);
+  return { root, bin };
+}
+
+const runCli = (bin, args) => {
+  const env = { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, NO_COLOR: '1' };
+  delete env.FORCE_COLOR;
+  return spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', cwd: repo, env });
+};
+
+test('a taken random name is rerolled, not offered', () => {
+  // Two possible names; one of them already exists, so only 'bb-humming-owl'
+  // is available. Ten independent picks all landing on the taken half would
+  // fail this — that is 1 in 1024, and is the price of testing the real
+  // generator instead of a stubbed one.
+  const { root, bin } = cliWithWords(['aa', 'bb'], ['humming'], ['owl']);
+  git(repo, 'branch', 'aa-humming-owl');
+
+  const r = runCli(bin, ['--random', '--json', '-n']);
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.equal(j.branch, 'bb-humming-owl');
+
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  spawnSync('git', ['-C', repo, 'branch', '-D', 'bb-humming-owl']);
+  gitTry(repo, 'branch', '-D', 'aa-humming-owl');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('exhausting the rerolls without a terminal is E_VALIDATION, not a hang', () => {
+  // One possible name, and it is taken. Every reroll must fail, and the
+  // non-interactive path cannot fall through to a prompt nobody can answer.
+  const { root, bin } = cliWithWords(['aa'], ['humming'], ['owl']);
+  git(repo, 'branch', 'aa-humming-owl');
+
+  const r = runCli(bin, ['--random', '--json', '-n']);
+  assert.equal(r.status, 1);
+  const err = jsonLine(r.stderr).error;
+  assert.equal(err.code, 'E_VALIDATION');
+  assert.match(err.message, /random name/);
+
+  gitTry(repo, 'branch', '-D', 'aa-humming-owl');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('a random name is skipped when a worktree holds it', () => {
+  // The end-to-end property a user cares about: a name already in use is never
+  // handed out. It is the branch check that catches this — a worktree cannot
+  // hold a name a branch does not (git prints `detached`, not a branch line,
+  // for a worktree without one), which is why freeRandomName only asks git
+  // about branches.
+  const { root, bin } = cliWithWords(['aa', 'bb'], ['humming'], ['owl']);
+  git(repo, 'branch', 'aa-humming-owl');
+  git(repo, 'worktree', 'add', join(wtBase, 'aa-humming-owl'), 'aa-humming-owl');
+
+  const r = runCli(bin, ['--random', '--json', '-n']);
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.equal(j.branch, 'bb-humming-owl');
+
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', join(wtBase, 'aa-humming-owl')]);
+  gitTry(repo, 'branch', '-D', 'aa-humming-owl');
+  gitTry(repo, 'branch', '-D', 'bb-humming-owl');
+  rmSync(root, { recursive: true, force: true });
+});
