@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync, spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { Buffer } from 'node:buffer';
 import {
@@ -135,6 +136,8 @@ try {
       expires: { type: 'string' },
       ai: { type: 'string' },
       'no-ai': { type: 'boolean' },
+      random: { type: 'boolean' },
+      'no-random': { type: 'boolean' },
       'no-submodules': { type: 'boolean' },
       force: { type: 'boolean', short: 'f' },
       'no-cd': { type: 'boolean', short: 'n' },
@@ -402,6 +405,17 @@ if (positionals.length > 1) {
 const doSubmodules = !values['no-submodules'];
 const force = !!values.force;
 const stayOut = !!values['no-cd'];
+
+// The random-first prompt is the default; --no-random restores the 0.3.x flow
+// of describing the work to an AI straight away.
+const randomOff =
+  !!values['no-random'] ||
+  ['off', '0', 'false', 'none'].includes(process.env.GWQADD_RANDOM ?? '');
+const randomFirst = !randomOff;
+
+if (values.random && values['no-random']) {
+  die('E_VALIDATION', '--random and --no-random cannot both be given');
+}
 
 // ── interactivity ────────────────────────────────────────────────────────────
 
@@ -723,6 +737,29 @@ const NOUNS = [
   'zinnia'
 ];
 
+// ── random names ─────────────────────────────────────────────────────────────
+
+// crypto, not Math.random: two shells started in the same second must not be
+// able to agree on a branch name. The modulo biases the first few words of each
+// list upward by about 407 / 2^32, which is invisible at any number of branches
+// a person will ever create.
+const pick = (a) => a[randomBytes(4).readUInt32BE(0) % a.length];
+const randomName = () => `${pick(ADJECTIVES)}-${pick(GERUNDS)}-${pick(NOUNS)}`;
+
+const RANDOM_TRIES = 10;
+
+// `claude -w` lets a collision become a hard error; we reroll instead. The
+// check has to happen before the name is shown, so the confirmation prompt can
+// never offer something that cannot be created (I24). Ten failures in a
+// 9,582,408-name space means our randomness is broken, not the user's luck.
+function freeRandomName(dir) {
+  for (let i = 0; i < RANDOM_TRIES; i++) {
+    const name = randomName();
+    if (!hasLocalBranch(dir, name) && !worktreePath(dir, name)) return name;
+  }
+  return '';
+}
+
 // ── naming (interactive only) ────────────────────────────────────────────────
 
 // Everything about the repository worth telling a model that is choosing a
@@ -984,7 +1021,7 @@ async function confirmCreate(name, base) {
 // never runs unless there is a terminal and no positional was given.
 async function composeBranchName(dir, repo, base) {
   const ai = detectAi();
-  if (!ai) return typeItYourself();
+  if (!ai) return { branch: await typeItYourself(), named: 'manual' };
 
   const ctx = repoContext(dir, repo, base);
   const rejected = [];
@@ -995,24 +1032,24 @@ async function composeBranchName(dir, repo, base) {
       `${dim('│')} what do you want to do? ${dim('(any language)')}\n${dim('│')} ${dim('>')} `,
     );
     // An empty answer is the escape hatch out of the AI entirely.
-    if (!description) return typeItYourself();
+    if (!description) return { branch: await typeItYourself(), named: 'manual' };
 
     const res = await askAi(ai, namingPrompt(ctx, description, rejected));
     if (!res.ok) {
       warn(`${aiLabel(ai)} failed — name it yourself instead`);
       const first = (res.err || '').trim().split('\n')[0];
       if (first) log(`${dim('│')} ${dim(first.slice(0, 120))}`);
-      return typeItYourself();
+      return { branch: await typeItYourself(), named: 'manual' };
     }
     const candidates = parseCandidates(res.out);
     if (candidates.length === 0) {
       warn(`${aiLabel(ai)} returned nothing usable — name it yourself instead`);
-      return typeItYourself();
+      return { branch: await typeItYourself(), named: 'manual' };
     }
 
     const choice = await confirmCreate(candidates[0], ctx.base);
-    if (choice.create) return candidates[0];
-    if (choice.edit) return typeItYourself(candidates[0]);
+    if (choice.create) return { branch: candidates[0], named: 'ai' };
+    if (choice.edit) return { branch: await typeItYourself(candidates[0]), named: 'manual' };
     // Rejected: remember every suggestion from this round so the next prompt
     // cannot come back with a near-identical name.
     rejected.push(...candidates);
@@ -1176,17 +1213,32 @@ async function main() {
   }
 
   let branch = positionals[0];
+  let named = 'argument';
   if (branch) {
+    // A name on the command line is the user speaking; never second-guess it.
+    if (values.random) {
+      die('E_VALIDATION', '--random cannot be combined with a branch name');
+    }
     // git would reject this later with a less obvious message.
     if (!validBranchName(branch)) {
       die('E_VALIDATION', `'${branch}' is not a valid branch name`);
     }
-  } else {
-    if (isNonInteractive) {
+  } else if (isNonInteractive) {
+    // --random is the one naming path that needs no terminal: it is arithmetic
+    // over a constant array, so nothing is triggered that the caller did not
+    // ask for by name (I15).
+    if (!values.random) {
       die('E_VALIDATION', 'a branch name is required — `gwqadd <branch>`');
     }
+    branch = freeRandomName(cwd);
+    if (!branch) {
+      die('E_VALIDATION',
+        `could not find an unused random name in ${RANDOM_TRIES} tries — pass a branch name`);
+    }
+    named = 'random';
+  } else {
     // composeBranchName only ever returns a name git has already accepted.
-    branch = await composeBranchName(cwd, repo, base);
+    ({ branch, named } = await composeBranchName(cwd, repo, base));
   }
 
   const branchExisted = hasLocalBranch(cwd, branch);
@@ -1201,7 +1253,7 @@ async function main() {
   if (existing && existsSync(existing)) {
     log(`${dim('│')} ${dim('worktree already exists')}`);
     log(`${dim('└')} ${green('✓')} ${cyan(branch)} ${dim('→')} ${existing}`);
-    return finish({ repo, branch, base, path: existing, created: 'none' });
+    return finish({ repo, branch, base, path: existing, created: 'none', named });
   }
 
   // Two ways in. Without --from, `gwq add -b` creates branch and worktree in
@@ -1292,14 +1344,14 @@ async function main() {
 
   log(`${dim('└')} ${green('✓')} ${cyan(branch)} ${dim('→')} ${created}`);
   return finish({
-    repo, branch, base, path: created,
+    repo, branch, base, path: created, named,
     created: branchExisted ? 'worktree' : 'branch+worktree',
   });
 }
 
 // ── output ───────────────────────────────────────────────────────────────────
 
-async function finish({ repo, branch, base, path, created }) {
+async function finish({ repo, branch, base, path, created, named }) {
   if (isJson) {
     process.stdout.write(JSON.stringify({
       schemaVersion: SCHEMA_VERSION,
@@ -1308,6 +1360,9 @@ async function finish({ repo, branch, base, path, created }) {
       base: { ref: base.ref, sha: base.sha },
       repo: { root: repo.root, name: repo.name },
       created,
+      // How the name was chosen, so a caller can tell a name it picked from one
+      // the tool invented. Adding a field does not bump schemaVersion (I10).
+      named,
       cd: !stayOut,
     }) + '\n');
     return;

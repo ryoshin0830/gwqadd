@@ -582,3 +582,52 @@ test('re-sourcing is idempotent even with a stale function defined', (t) => {
   assert.match(r.stdout, /^gwqadd \d+\.\d+\.\d+/m, 'the new function must have replaced the stale one');
   assert.doesNotMatch(r.stderr, /cd:|no such file/);
 });
+
+// ── random names ─────────────────────────────────────────────────────────────
+
+const RANDOM_SHAPE = /^[a-z]{3,9}-[a-z]{5,10}-[a-z]{3,9}$/;
+
+test('--random names and creates a branch with no terminal and no AI', () => {
+  const ai = canaryAi();
+  const r = spawnSync(process.execPath, [BIN, '--random', '--json', '-n'], {
+    encoding: 'utf8',
+    cwd: repo,
+    env: {
+      ...process.env, PATH: `${shimDir}:${process.env.PATH}`,
+      NO_COLOR: '1', GWQADD_AI: ai.bin, FORCE_COLOR: undefined,
+    },
+  });
+  const called = ai.called();
+  rmSync(ai.dir, { recursive: true, force: true });
+
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.match(j.branch, RANDOM_SHAPE);
+  assert.match(j.branch.split('-')[1], /ing$/, 'the middle word is a gerund');
+  assert.equal(j.named, 'random');
+  assert.equal(j.created, 'branch+worktree');
+  assert.equal(branchExists(j.branch), true);
+  assert.equal(called, false, 'a random name must never reach for an AI');
+
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  spawnSync('git', ['-C', repo, 'branch', '-D', j.branch]);
+});
+
+test('--random and an explicit branch name is a contradiction', () => {
+  const r = run(['--random', '--json', '-n', 'feat/explicit']);
+  assert.equal(r.status, 1);
+  assert.equal(jsonLine(r.stderr).error.code, 'E_VALIDATION');
+});
+
+test('--random and --no-random together is a contradiction', () => {
+  const r = run(['--random', '--no-random', '--json', '-n']);
+  assert.equal(r.status, 1);
+  assert.equal(jsonLine(r.stderr).error.code, 'E_VALIDATION');
+});
+
+test('an explicit branch name reports named=argument', () => {
+  const j = out(run(['--json', '-n', 'feat/named-arg']));
+  assert.equal(j.named, 'argument');
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  spawnSync('git', ['-C', repo, 'branch', '-D', 'feat/named-arg']);
+});
