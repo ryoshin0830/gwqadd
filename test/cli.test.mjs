@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   mkdtempSync, writeFileSync, chmodSync, rmSync, mkdirSync,
-  existsSync, readdirSync, realpathSync,
+  existsSync, readdirSync, realpathSync, readFileSync, copyFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -155,6 +155,38 @@ test('--init fish output parses under fish -n', (t) => {
 
 test('--cmd renames the emitted function', () => {
   assert.match(run(['--init', 'zsh', '--cmd', 'gwa']).stdout, /^gwa\(\) \{/m);
+});
+
+// ── generated word lists ─────────────────────────────────────────────────────
+//
+// The arrays are parsed out of the source rather than imported: bin/gwqadd.mjs
+// runs main() at load, so importing it would run the CLI. This is also the
+// regression test for I23 — a hand-edit that bypasses tools/build-words.mjs
+// shows up here as a wrong count, a duplicate or a stray character.
+const source = readFileSync(BIN, 'utf8');
+
+function wordList(name) {
+  const m = source.match(new RegExp(`const ${name} = \\[([^\\]]*)\\]`));
+  assert.ok(m, `${name} not found in bin/gwqadd.mjs`);
+  return m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
+}
+
+test('the generated word lists have the shape the generator assumes', () => {
+  for (const [name, count, shape] of [
+    ['ADJECTIVES', 216, /^[a-z]{3,9}$/],
+    ['GERUNDS', 109, /^[a-z]{5,10}$/],
+    ['NOUNS', 407, /^[a-z]{3,9}$/],
+  ]) {
+    const words = wordList(name);
+    assert.equal(words.length, count, `${name}: expected ${count} words`);
+    assert.equal(new Set(words).size, count, `${name}: duplicates`);
+    assert.deepEqual([...words].sort(), words, `${name}: not sorted`);
+    for (const w of words) assert.match(w, shape, `${name}: ${w}`);
+  }
+  assert.deepEqual(
+    wordList('GERUNDS').filter((w) => !w.endsWith('ing')), [],
+    'every gerund ends in ing',
+  );
 });
 
 // ── validation ───────────────────────────────────────────────────────────────

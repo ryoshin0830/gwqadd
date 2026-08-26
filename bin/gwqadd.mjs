@@ -597,6 +597,132 @@ function defaultBranch(dir) {
   return head ? head.replace(/^refs\/remotes\/origin\//, '') : '';
 }
 
+// ── word lists (generated — do not hand-edit) ────────────────────────────────
+//
+// Regenerate with `node tools/build-words.mjs`. Editing these by hand drifts
+// the counts from the recipe and discards the licence trail (I23).
+//
+// Adjectives and nouns: glitchdotcom/friendly-words, MIT (c) 2018 Glitch.
+// Gerunds: dariusk/corpora, CC0.
+//
+// The counts match `claude -w` (216 * 109 * 407 = 9,582,408 names); the words
+// deliberately do not. See the design doc for why they were not copied.
+
+const ADJECTIVES = [
+  'aback', 'abrupt', 'achieved', 'adaptable', 'aerial', 'airy', 'alike',
+  'alpine', 'amplified', 'apricot', 'ash', 'available', 'azure', 'basalt',
+  'bejeweled', 'bevel', 'bloom', 'bold', 'boundless', 'branched', 'brawny',
+  'bright', 'bronzed', 'burly', 'butternut', 'cactus', 'candied', 'caramel',
+  'carpal', 'celestial', 'chambray', 'checkered', 'chestnut', 'chisel',
+  'citrine', 'clean', 'cloudy', 'coconut', 'colossal', 'concise', 'cookie',
+  'cord', 'creative', 'cuddly', 'cyber', 'daily', 'darkened', 'decorous',
+  'delicious', 'dented', 'diamond', 'dolomite', 'dune', 'early', 'educated',
+  'elated', 'elite', 'endurable', 'equinox', 'evergreen', 'expensive',
+  'faceted', 'familiar', 'fantastic', 'fearless', 'field', 'first', 'flannel',
+  'flax', 'flower', 'foremost', 'fortune', 'freckle', 'frill', 'furtive',
+  'garrulous', 'geode', 'ginger', 'glib', 'glorious', 'goldenrod', 'graceful',
+  'grass', 'grey', 'guiltless', 'half', 'happy', 'heathered', 'helpful',
+  'hill', 'honorable', 'humane', 'hurricane', 'icy', 'important', 'innate',
+  'iodized', 'island', 'jet', 'judicious', 'juvenile', 'knotty', 'languid',
+  'lavender', 'learned', 'level', 'lime', 'lively', 'lopsided', 'lumbar',
+  'luxurious', 'magical', 'malleable', 'marble', 'marred', 'massive', 'mellow',
+  'mercurial', 'mica', 'military', 'mire', 'modest', 'mousy', 'narrow',
+  'nebula', 'nice', 'ninth', 'numerous', 'occipital', 'olivine', 'orchid',
+  'ossified', 'pale', 'past', 'pear', 'perfect', 'petalite', 'picayune',
+  'pineapple', 'plaid', 'platinum', 'plume', 'polarized', 'polyester',
+  'prairie', 'private', 'proximal', 'pyrite', 'quickest', 'quilted', 'radical',
+  'raspy', 'regal', 'repeated', 'respected', 'ringed', 'road', 'romantic',
+  'round', 'rustic', 'salt', 'sapphire', 'scented', 'season', 'sedate',
+  'separate', 'shaded', 'sheer', 'shiny', 'shrub', 'silky', 'sincere',
+  'skitter', 'slimy', 'smooth', 'solar', 'southern', 'speckle', 'spiced',
+  'spiral', 'spotless', 'spurious', 'steel', 'stone', 'strong', 'subdued',
+  'sugar', 'sumptuous', 'superb', 'sweet', 'tame', 'tartan', 'temporal',
+  'thankful', 'thoracic', 'tide', 'tiny', 'torpid', 'tropical', 'tundra',
+  'typhoon', 'unique', 'upbeat', 'valiant', 'vast', 'verbose', 'violet',
+  'volcano', 'water', 'west', 'wholesale', 'winter', 'wobbly', 'woolen',
+  'young', 'zest'
+];
+
+const GERUNDS = [
+  'abiding', 'adding', 'affording', 'amazing', 'appearing', 'asking',
+  'attracting', 'baring', 'behaving', 'blotting', 'booking', 'boxing',
+  'brushing', 'bustling', 'carrying', 'charming', 'chopping', 'clipping',
+  'colouring', 'completing', 'continuing', 'counting', 'curing', 'daring',
+  'delighting', 'deserving', 'doubling', 'dropping', 'employing', 'escaping',
+  'exercising', 'exploding', 'fastening', 'filling', 'floating', 'flying',
+  'forming', 'gathering', 'gluing', 'guessing', 'hanging', 'heating',
+  'hopping', 'hunting', 'including', 'intending', 'joining', 'kicking',
+  'knowing', 'launching', 'licking', 'listing', 'loving', 'matching',
+  'melting', 'mining', 'muddling', 'nesting', 'obeying', 'offering', 'owning',
+  'parting', 'pedaling', 'phoning', 'planning', 'poking', 'pouring',
+  'preferring', 'printing', 'pulling', 'pushing', 'raining', 'recording',
+  'rejoicing', 'reminding', 'replying', 'returning', 'rotating', 'sailing',
+  'scorching', 'sealing', 'shading', 'shining', 'signing', 'slapping',
+  'smiling', 'snoring', 'sparing', 'spotting', 'squeaking', 'standing',
+  'stepping', 'stretching', 'suggesting', 'surprising', 'taming', 'testing',
+  'ticking', 'touching', 'trading', 'trusting', 'tying', 'unpacking',
+  'wailing', 'warming', 'weighing', 'whistling', 'wondering', 'yawning'
+];
+
+const NOUNS = [
+  'aardvark', 'acorn', 'actress', 'aftermath', 'air', 'airport', 'alibi',
+  'almanac', 'aluminum', 'amp', 'ancient', 'anise', 'antimony', 'apology',
+  'appliance', 'archduke', 'armchair', 'article', 'asterisk', 'attempt',
+  'author', 'axolotl', 'bag', 'ball', 'barbecue', 'barn', 'barracuda',
+  'basket', 'bathtub', 'beak', 'bearskin', 'bedbug', 'beginner', 'beluga',
+  'bicycle', 'birch', 'bit', 'blarney', 'blouse', 'boat', 'bongo', 'booth',
+  'bow', 'braid', 'brass', 'breath', 'broccoli', 'brow', 'buckaroo', 'buffet',
+  'bun', 'butter', 'cabbage', 'cafe', 'camera', 'candytuft', 'cap', 'caption',
+  'carbon', 'caribou', 'carpet', 'carver', 'cat', 'catmint', 'ceder', 'cello',
+  'centipede', 'chair', 'change', 'chauffeur', 'chemistry', 'chevre', 'chill',
+  'chive', 'cicada', 'cirrus', 'clarinet', 'click', 'clock', 'clover', 'coat',
+  'cockroach', 'cold', 'colossus', 'comfort', 'concrete', 'conifer', 'copy',
+  'corn', 'couch', 'course', 'cowl', 'crate', 'creature', 'cricket', 'crow',
+  'cub', 'cupcake', 'curve', 'cylinder', 'dancer', 'dataset', 'decade', 'den',
+  'desk', 'dewberry', 'dichondra', 'dinghy', 'discovery', 'dogwood', 'donut',
+  'drain', 'drifter', 'drizzle', 'duckling', 'durian', 'earth', 'echo',
+  'education', 'elbow', 'elm', 'energy', 'entree', 'ermine', 'evergreen',
+  'eyebrow', 'falcon', 'farm', 'feather', 'femur', 'ferret', 'fibre', 'figure',
+  'fine', 'flag', 'flavor', 'flood', 'flyaway', 'football', 'form', 'foxtail',
+  'freedom', 'friction', 'frog', 'function', 'galley', 'garage', 'garnet',
+  'gauge', 'gemini', 'gerbera', 'ginger', 'glasses', 'glow', 'golf', 'gouda',
+  'gram', 'grey', 'group', 'guarantee', 'gull', 'haddock', 'hallway',
+  'handsaw', 'hare', 'hawthorn', 'health', 'heaven', 'hellebore', 'herring',
+  'hiss', 'homegrown', 'hoof', 'hose', 'hourglass', 'humerus', 'hydrangea',
+  'hyphen', 'icon', 'income', 'ink', 'iron', 'jacket', 'jasmine', 'jellyfish',
+  'jodhpur', 'judge', 'juniper', 'kayak', 'keyboard', 'king', 'knee', 'krill',
+  'lake', 'land', 'larkspur', 'launch', 'lead', 'legal', 'lemur', 'letter',
+  'license', 'lighter', 'limpet', 'lion', 'liver', 'lobster', 'logic', 'lunch',
+  'lychee', 'macaw', 'magician', 'mailbox', 'mallow', 'mandible', 'manta',
+  'march', 'market', 'mars', 'mastodon', 'may', 'medallion', 'memory',
+  'meteoroid', 'midnight', 'mine', 'mirror', 'molasses', 'money', 'moon',
+  'mosquito', 'mountain', 'muenster', 'museum', 'mustang', 'napkin', 'nebula',
+  'neon', 'net', 'newt', 'nitrogen', 'nurse', 'oatmeal', 'octagon', 'office',
+  'onion', 'opinion', 'orca', 'origami', 'ounce', 'owl', 'pail', 'pan',
+  'panther', 'papyrus', 'park', 'particle', 'passive', 'path', 'pea', 'pear',
+  'pencil', 'perch', 'pet', 'pharaoh', 'piccolo', 'pig', 'pin', 'piper',
+  'place', 'plant', 'platypus', 'plot', 'plutonium', 'polyester', 'porter',
+  'potato', 'prawn', 'prince', 'process', 'proof', 'ptarmigan', 'puppet',
+  'pyramid', 'quart', 'quill', 'quotation', 'radiator', 'raft', 'rainstorm',
+  'range', 'reaction', 'recess', 'region', 'repair', 'research', 'reward',
+  'riddle', 'riverbed', 'rock', 'rook', 'rosemary', 'rubidium', 'runner',
+  'saguaro', 'salary', 'salute', 'sapphire', 'saturn', 'saxophone', 'scapula',
+  'school', 'scooter', 'screen', 'seaplane', 'second', 'seer', 'server',
+  'shallot', 'shear', 'shift', 'shop', 'shroud', 'silence', 'silver', 'skull',
+  'slice', 'slipper', 'smoke', 'sneeze', 'snowman', 'soarer', 'sodalite',
+  'sole', 'soul', 'soy', 'spark', 'spectrum', 'spider', 'split', 'sprint',
+  'spy', 'stage', 'station', 'step', 'sting', 'stocking', 'story', 'streetcar',
+  'subject', 'suit', 'sundial', 'sunspot', 'surgeon', 'sweater', 'swordfish',
+  'system', 'tailor', 'tangelo', 'target', 'tartan', 'teal', 'tellurium',
+  'tent', 'textbook', 'thorium', 'throne', 'tick', 'tile', 'tip', 'toast',
+  'topaz', 'town', 'traffic', 'traveler', 'tricorne', 'trouser', 'trust',
+  'tugboat', 'turkey', 'turret', 'twine', 'uncle', 'vacation', 'variety',
+  'vein', 'vertebra', 'viola', 'viscose', 'voice', 'walk', 'walleye',
+  'warbler', 'wasp', 'wave', 'weaver', 'whale', 'whitefish', 'wineberry',
+  'wisteria', 'wolfsbane', 'woolen', 'wrinkle', 'xylophone', 'yarrow', 'zebra',
+  'zinnia'
+];
+
 // ── naming (interactive only) ────────────────────────────────────────────────
 
 // Everything about the repository worth telling a model that is choosing a
