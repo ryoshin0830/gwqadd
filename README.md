@@ -99,6 +99,23 @@ So the fix is one flag:
 gwqadd feat/logout --from main
 ```
 
+## No name? Take a random one
+
+Run `gwqadd` with no branch name and it rolls one before it asks you anything:
+
+```
+│ plume-melting-bearskin   off main
+│ create it? [Y]es · [n]o, name it properly · [e]dit · [r]eroll
+```
+
+Three words, no prefix, no waiting — nothing has been sent anywhere and nothing
+created. `r` rolls again, `e` edits it, and `n` drops you into the naming help
+below, where an AI names the branch in your repository's own style.
+
+`--random` skips the confirmation and is the only naming path that works without
+a terminal, which makes it the one scripts and agents should use. `--no-random`
+(or `GWQADD_RANDOM=off`) starts at the description prompt instead.
+
 ## Naming help
 
 One question, one confirmation:
@@ -180,6 +197,8 @@ gwqadd [options] [<branch>]
 | `--expires <dur>` | hand gwq an expiry (`1h`, `7d`, …) for a throwaway worktree |
 | `--ai <cmd>` | AI CLI used to suggest names (default: autodetected) |
 | `--no-ai` | never ask an AI, even when one is installed |
+| `--random` | skip the questions and generate a name |
+| `--no-random` | start by describing the work instead of rolling a name |
 | `--no-submodules` | skip `git submodule update --init --recursive` |
 | `-f`, `--force` | move a colliding worktree directory aside instead of failing |
 | `-n`, `--no-cd` | do the work and report the path, but do not move the shell |
