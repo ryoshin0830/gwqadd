@@ -425,6 +425,13 @@ Because every push releases, treat main as the publish button: docs fixes and
 test tweaks land as real versions. That is deliberate; if it ever feels wrong,
 the fix is fewer pushes to main, not a new gate.
 
+Commit-message footgun: GitHub reads **every line** of a push's HEAD message,
+not just the subject, and skips the whole event when any of them carries a CI
+skip token. One release note once said `The bump commit carries [skip ci]` and
+that push released nothing — silently. Never write the token in prose; say
+"the skip token" instead. The bot's own releases use it legitimately, which is
+why they never fan out.
+
 CI publishes with npm trusted publishing (OIDC), so there is no npm token on
 any laptop and none in this repository's secrets. A publish-capable token
 sitting in `~/.npmrc` is exactly what the worm this file already worries about
