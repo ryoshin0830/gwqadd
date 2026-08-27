@@ -414,12 +414,16 @@ gh run watch                # optional; the publish happens in CI
 npx -y gwqadd@latest --version
 ```
 
-**Do not run `npm publish` by hand.** The version in `package.json` on main is
-what npm should be serving, and CI keeps it that way: every push to main runs
-the suite and then publishes, but only when that exact version is not on the
-registry yet. An ordinary commit is therefore a test run and a no-op; a commit
-that bumps the version is a release. Re-run a failed one with
+**Do not run `npm publish` by hand.** **Every push to main releases.** CI runs
+the suite, then publishes whatever `package.json` says — raising patch itself,
+and committing that bump back to main, when the version there has already
+shipped. Bump manually first (`npm version minor`) to choose a number; forget,
+and you still shipped at +patch. Re-run a failure with
 `gh workflow run publish.yml` — there is nothing to undo and no tag to move.
+
+Because every push releases, treat main as the publish button: docs fixes and
+test tweaks land as real versions. That is deliberate; if it ever feels wrong,
+the fix is fewer pushes to main, not a new gate.
 
 CI publishes with npm trusted publishing (OIDC), so there is no npm token on
 any laptop and none in this repository's secrets. A publish-capable token

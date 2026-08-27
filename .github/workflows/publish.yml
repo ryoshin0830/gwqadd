@@ -1,9 +1,15 @@
 name: publish
 
-# Whatever version sits in package.json on main is what npm should be serving.
-# Every push to main runs the suite, then publishes — but only when that exact
-# version is not on the registry yet, so ordinary commits are a test run and a
-# no-op rather than a failed release.
+# **Every** push to main ends with something published on npm. main's
+# package.json is the desired state, never merely a suggestion:
+#
+#   version already on the registry → CI bumps patch, commits that to main,
+#                                      publishes the new number
+#   version not yet on the registry  → published exactly as written, so
+#                                      `npm version minor` still lets you
+#                                      choose the number yourself
+#
+# The suite gates both paths; a red suite releases nothing.
 #
 # Publishing uses npm trusted publishing (OIDC): CI mints a short-lived token
 # per run, so no npm credential exists on a laptop or in this repository's
@@ -15,17 +21,13 @@ name: publish
 # One-time setup per package, on npmjs.com → the package → Settings → Trusted
 # Publisher: GitHub Actions, owner `ryoshin0830`, this repository, workflow
 # filename `publish.yml`, allowed action `npm publish`.
-#
-# The release tag `npm version` writes is history, not the trigger. Firing on
-# both the branch and the tag would start two runs for one `git push
-# --follow-tags`, and they would race for the same version.
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # only so a version bump can be committed back to main
   id-token: write # the OIDC token npm authenticates the publish with
 
 # Never let two runs publish at once. Not cancel-in-progress: killing a run
@@ -67,32 +69,45 @@ jobs:
       # carries no lockfile, so there is nothing to install.
       - run: npm test
 
-      - name: Is this version already on the registry?
-        id: check
+      # prepublishOnly runs the suite again plus `npm pack --dry-run` and
+      # --help. No NODE_AUTH_TOKEN — OIDC is the credential.
+      #
+      # The bump-back step is what makes "any case" literal: npm refuses a
+      # duplicate version, so a push whose version already shipped raises the
+      # patch itself rather than letting the run die or silently no-op. It is
+      # committed under the bot identity with [skip ci], or the push would wake
+      # this very workflow and chase its own tail. A race against main moving
+      # underneath loses nothing — the rebase retries once against the very
+      # serialization `concurrency` above usually makes moot.
+      - name: Publish — as written when new, +patch when already out
         run: |
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
-          echo "main is at $name@$version"
+
           # A package that has never been published 404s here; an unreachable
-          # registry fails here too. Both land on "try to publish", because npm
-          # itself refuses a duplicate version — a loud rejection beats silently
-          # skipping a release someone is waiting for.
+          # registry fails here too. Both land on "publish as written", which is
+          # still safe: npm refuses a duplicate itself.
           published=$(npm view "$name" versions --json 2>/dev/null || echo null)
           if node -e '
             const v = process.argv[1];
             let list = [];
-            try { const p = JSON.parse(process.argv[2]); list = [].concat(p == null ? [] : p); } catch (e) {}
+            try { list = [].concat(JSON.parse(process.argv[2])); } catch (e) {}
             process.exit(list.includes(v) ? 0 : 1);
           ' "$version" "$published"; then
-            echo "$version is already published — nothing to do"
-            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "$version is already out — bumping patch"
+            npm version patch --no-git-tag-version
+            version=$(node -p "require('./package.json').version")
+
+            git config user.name  'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add package.json
+            git commit -m "chore(release): ${version} [skip ci]"
+            git push origin HEAD:main \
+              || { git pull --rebase origin main && git push origin HEAD:main; }
+            echo "committed the bump to main"
           else
-            echo "$version is new — publishing"
-            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "$version is new — publishing as written"
           fi
 
-      # prepublishOnly runs the suite again plus `npm pack --dry-run` and
-      # --help. No NODE_AUTH_TOKEN — OIDC is the credential.
-      - name: npm publish
-        if: steps.check.outputs.publish == 'true'
-        run: npm publish
+          echo "releasing ${name}@${version}"
+          npm publish
