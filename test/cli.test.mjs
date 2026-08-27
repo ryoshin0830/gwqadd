@@ -426,13 +426,13 @@ function canaryAi() {
   return { dir, bin, marker, called: () => existsSync(marker) };
 }
 
-function runInteractiveExpect(lines, ai) {
+function runInteractiveExpect(lines, ai, args = []) {
   const script = join(sandbox, 'interactive.exp');
   writeFileSync(script, [
     'set timeout 5',
     'set node [lindex $argv 0]',
     'set bin [lindex $argv 1]',
-    'spawn $node $bin --no-cd',
+    `spawn $node $bin --no-cd${args.map((a) => ` ${a}`).join('')}`,
     ...lines,
   ].join('\n') + '\n');
   const env = {
@@ -470,7 +470,7 @@ test('n and e return to responsive line prompts', (t) => {
     'expect eof',
     'set result [wait]',
     'exit [lindex $result 3]',
-  ], ai);
+  ], ai, ['--no-random']);
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
   assert.equal(branchExists('fix/edited-name'), true);
 });
@@ -491,9 +491,77 @@ test('Ctrl-C after edit exits 130', (t) => {
     'expect eof',
     'set result [wait]',
     'exit [lindex $result 3]',
-  ], ai);
+  ], ai, ['--no-random']);
   assert.equal(r.status, 130, `${r.stdout}\n${r.stderr}`);
   assert.equal(branchExists('feat/a'), false, 'interrupt creates nothing');
+});
+
+// The random path, driven for real. CLAUDE.md's warning is about `script`,
+// which calls tcgetattr on its own stdin; `expect` allocates a pty properly and
+// these are the tests that used to be a by-hand matrix.
+
+test('the interactive flow rolls a name before it asks anything', (t) => {
+  if (spawnSync('expect', ['-v'], { stdio: 'ignore' })  .error) {
+    return t.skip('expect not installed');
+  }
+  const ai = canaryAi();
+  t.after(() => rmSync(ai.dir, { recursive: true, force: true }));
+  const r = runInteractiveExpect([
+    // No description prompt comes first: the name is already there.
+    'expect "create it?"',
+    'send -- "Y"',
+    'expect eof',
+    'set result [wait]',
+    'exit [lindex $result 3]',
+  ], ai);
+  assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+  assert.equal(ai.called(), false, 'the fast path must not start an AI');
+  const rolled = gitTry(repo, 'branch', '--format=%(refname:short)')
+    .stdout.split('\n').map((l) => l.trim())
+    .filter((b) => RANDOM_SHAPE.test(b));
+  assert.equal(rolled.length, 1, `expected one rolled branch, got ${rolled.join(', ')}`);
+});
+
+test('r rerolls to a different name', (t) => {
+  if (spawnSync('expect', ['-v'], { stdio: 'ignore' }).error) {
+    return t.skip('expect not installed');
+  }
+  const ai = canaryAi();
+  t.after(() => rmSync(ai.dir, { recursive: true, force: true }));
+  const r = runInteractiveExpect([
+    'expect "create it?"',
+    'send -- "r"',
+    'expect "create it?"',
+    'send -- "Y"',
+    'expect eof',
+    'set result [wait]',
+    'exit [lindex $result 3]',
+  ], ai);
+  assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+  const offered = [...new Set(r.stdout.match(/[a-z]{3,9}-[a-z]{5,10}-[a-z]{3,9}/g) ?? [])];
+  assert.ok(offered.length >= 2, `r must produce a new name, saw: ${offered.join(', ')}`);
+});
+
+test('n at the rolled name falls through to the AI', (t) => {
+  if (spawnSync('expect', ['-v'], { stdio: 'ignore' }).error) {
+    return t.skip('expect not installed');
+  }
+  const ai = canaryAi();
+  t.after(() => rmSync(ai.dir, { recursive: true, force: true }));
+  const r = runInteractiveExpect([
+    'expect "create it?"',
+    'send -- "n"',
+    'expect "what do you want to do?"',
+    'send -- "fix the login bug\\r"',
+    'expect "create it?"',
+    'send -- "Y"',
+    'expect eof',
+    'set result [wait]',
+    'exit [lindex $result 3]',
+  ], ai);
+  assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+  assert.equal(ai.called(), true, 'n is what buys the AI round trip');
+  assert.equal(branchExists('feat/a'), true);
 });
 
 test('a branch name on the command line never reaches the AI', () => {

@@ -444,35 +444,33 @@ Two traps for anyone adding tests:
   `FORCE_COLOR`, because we set `NO_COLOR` and node warns to stderr when it sees
   both. That failed a sibling package's suite at `npm publish` time.
 
-**The interactive flow cannot be automated here.** macOS `script` calls
-`tcgetattr` on its own stdin and fails under a pipe, so it cannot be driven from
-`spawnSync`; a real pty would mean a dependency, which I12 forbids. Driving it
-from an interactive shell by hand works (`script -q /dev/null zsh -c '…'` with
-keystrokes piped in) and is what the matrix below assumes. Do not spend an
-afternoon rediscovering this.
+**The interactive flow is driven with `expect`, not `script`.** macOS `script`
+calls `tcgetattr` on its own stdin and fails under a pipe, so it cannot be
+driven from `spawnSync` — piping keystrokes into it just hangs until something
+kills it. `expect` allocates a pty properly and works, which is what
+`runInteractiveExpect()` uses; it takes the keystroke script and any extra
+flags, and the tests skip themselves when `expect` is not installed. `expect`
+is a test-time tool on the developer's machine, not a package dependency, so
+I12 is untouched.
+
+Covered there: the rolled name appearing before any question, `r` rerolling to
+a different one, `n` falling through to the AI, `e` editing, and Ctrl-C exiting
+130. Add to those tests rather than to the matrix below.
 
 Not covered — run by hand:
 
 | Scenario | Command | Expect |
 | --- | --- | --- |
-| The whole flow | `gwqadd`, describe work, `Y` | one suggestion, one confirm, created |
 | House style | in a repo using `bugfix/` | the suggestion uses `bugfix/`, not `fix/` |
-| Reject | at the confirm, press `n` | back to the description; the old name never returns |
-| Edit | at the confirm, press `e` | prompt pre-filled with the suggestion |
 | Cancel | Esc at either prompt | exit 130, nothing created |
 | Dirty tree | modify files first | their paths reach the prompt, and the name reflects them |
 | AI sandbox | a `GWQADD_AI` script that runs `pwd >&2` | prints a temp dir, never the repo (I21) |
 | No repo contamination | `gwqadd` in this repo, describe unrelated work | the name follows the description, not CLAUDE.md |
-| No AI installed | `PATH=/usr/bin:/bin gwqadd` | straight to the ASCII-name prompt |
-| AI broken | `GWQADD_AI=false gwqadd` | warns, falls through to that prompt |
-| AI disabled | `gwqadd --no-ai` | no description prompt at all |
+| No AI installed | `PATH=/usr/bin:/bin gwqadd --no-random` | straight to the ASCII-name prompt |
+| AI broken | `GWQADD_AI=false gwqadd --no-random` | warns, falls through to that prompt |
+| AI disabled | `gwqadd --no-ai --no-random` | no description prompt at all |
 | Non-ASCII fallback | at the ASCII prompt, type Japanese | refused with advice, not slugified |
 | Messy model output | `GWQADD_AI='printf %s\\n 1)\\ feat/a'` | the numbering is stripped |
-| Random name | `gwqadd` | a three-word name appears instantly, no AI runs |
-| Random, then reroll | `gwqadd`, press `r` a few times | a new name each time, instantly |
-| Random, then AI | `gwqadd`, press `n` | the description prompt, then the AI |
-| Random off | `gwqadd --no-random` | straight to the description prompt |
-| Random for scripts | `gwqadd --random -n --json` | creates without asking, `"named":"random"` |
 | Real gwq layout | `gwqadd feat/x` in a ghq repo | lands under gwq's `worktree.basedir` |
 | `--expires` | `gwqadd tmp/x --expires 1h` | gwq records the expiry |
 | Submodules | in a repo with submodules | submodules populated |
