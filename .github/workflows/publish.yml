@@ -1,28 +1,38 @@
 name: publish
 
-# Releases are still cut locally — `npm version <patch|minor|major>` then
-# `git push --follow-tags`. This workflow is what turns that tag into a
-# published package, using npm trusted publishing (OIDC) so that no token with
-# publish rights ever exists on a laptop or in this repository's secrets. That
-# matters here: CLAUDE.md refuses install scripts because of the Shai-Hulud
-# worm, and a long-lived publish token on disk is the other half of that same
-# attack.
+# Whatever version sits in package.json on main is what npm should be serving.
+# Every push to main runs the suite, then publishes — but only when that exact
+# version is not on the registry yet, so ordinary commits are a test run and a
+# no-op rather than a failed release.
 #
-# One-time setup per package, on npmjs.com → package → Settings → Trusted
+# Publishing uses npm trusted publishing (OIDC): CI mints a short-lived token
+# per run, so no npm credential exists on a laptop or in this repository's
+# secrets. That matters here — CLAUDE.md refuses install scripts because of the
+# Shai-Hulud worm, and a long-lived publish token on disk is the other half of
+# that same attack. It is also what made every release need a browser and a
+# passkey.
+#
+# One-time setup per package, on npmjs.com → the package → Settings → Trusted
 # Publisher: GitHub Actions, owner `ryoshin0830`, this repository, workflow
 # filename `publish.yml`, allowed action `npm publish`.
 #
-# workflow_dispatch is deliberate: a tag pushed before this workflow existed,
-# or a re-run after a transient registry failure, would otherwise mean deleting
-# and re-pushing a tag that is already public.
+# The release tag `npm version` writes is history, not the trigger. Firing on
+# both the branch and the tag would start two runs for one `git push
+# --follow-tags`, and they would race for the same version.
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write # the OIDC token npm authenticates the publish with
+
+# Never let two runs publish at once. Not cancel-in-progress: killing a run
+# mid-publish is worse than making the next one wait.
+concurrency:
+  group: publish
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -57,6 +67,32 @@ jobs:
       # carries no lockfile, so there is nothing to install.
       - run: npm test
 
+      - name: Is this version already on the registry?
+        id: check
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          echo "main is at $name@$version"
+          # A package that has never been published 404s here; an unreachable
+          # registry fails here too. Both land on "try to publish", because npm
+          # itself refuses a duplicate version — a loud rejection beats silently
+          # skipping a release someone is waiting for.
+          published=$(npm view "$name" versions --json 2>/dev/null || echo null)
+          if node -e '
+            const v = process.argv[1];
+            let list = [];
+            try { const p = JSON.parse(process.argv[2]); list = [].concat(p == null ? [] : p); } catch (e) {}
+            process.exit(list.includes(v) ? 0 : 1);
+          ' "$version" "$published"; then
+            echo "$version is already published — nothing to do"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$version is new — publishing"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
       # prepublishOnly runs the suite again plus `npm pack --dry-run` and
       # --help. No NODE_AUTH_TOKEN — OIDC is the credential.
-      - run: npm publish
+      - name: npm publish
+        if: steps.check.outputs.publish == 'true'
+        run: npm publish

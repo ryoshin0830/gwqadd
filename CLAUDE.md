@@ -409,18 +409,27 @@ what lets the real generator be tested without a test hook in shipped code.
 git add -A && git commit -m "feat: …"
 npm pack --dry-run          # must not contain .claude/, CLAUDE.md, test/, .git/
 npm version patch           # or minor / major — commits and tags
-git push --follow-tags      # the tag fires .github/workflows/publish.yml
+git push --follow-tags      # pushing main fires .github/workflows/publish.yml
 gh run watch                # optional; the publish happens in CI
-npm view gwqadd version
 npx -y gwqadd@latest --version
 ```
 
-**Do not run `npm publish` by hand.** The tag is the release trigger, and CI
-publishes with npm trusted publishing (OIDC): there is no npm token on any
-laptop and none in this repository's secrets. A publish-capable token sitting
-in `~/.npmrc` is exactly what the worm this file already worries about goes
-looking for, and it is also the thing that made every release need a browser
-and a passkey.
+**Do not run `npm publish` by hand.** The version in `package.json` on main is
+what npm should be serving, and CI keeps it that way: every push to main runs
+the suite and then publishes, but only when that exact version is not on the
+registry yet. An ordinary commit is therefore a test run and a no-op; a commit
+that bumps the version is a release. Re-run a failed one with
+`gh workflow run publish.yml` — there is nothing to undo and no tag to move.
+
+CI publishes with npm trusted publishing (OIDC), so there is no npm token on
+any laptop and none in this repository's secrets. A publish-capable token
+sitting in `~/.npmrc` is exactly what the worm this file already worries about
+goes looking for, and it is also what made every release need a browser and a
+passkey.
+
+The tag `npm version` writes is history, not the trigger. Firing on the branch
+*and* the tag would start two runs for one `git push --follow-tags`, racing for
+the same version.
 
 `prepublishOnly` runs `npm test && npm pack --dry-run && node bin/gwqadd.mjs --help`,
 in CI as well as locally.
@@ -429,10 +438,6 @@ One-time setup per package, on npmjs.com → the package → Settings → Truste
 Publisher: GitHub Actions, owner `ryoshin0830`, this repository, workflow
 filename `publish.yml`, allowed action `npm publish`. Nothing to rotate
 afterwards — OIDC tokens are minted per run and expire with it.
-
-A tag that was pushed before the workflow existed, or a run that died on a
-transient registry error, is re-run with `gh workflow run publish.yml` rather
-than by deleting and re-pushing a public tag.
 
 The developer machine's `.npmrc` points `registry=` at a private mirror, which
 is why anything run locally against npmjs.org still needs
