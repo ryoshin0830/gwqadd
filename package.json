@@ -1,6 +1,6 @@
 {
   "name": "gwqadd",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Create a branch and its gwq worktree in the repository you are in, and cd there.",
   "type": "module",
   "bin": {
