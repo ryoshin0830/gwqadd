@@ -149,7 +149,13 @@ for (const checker of ['zsh', 'bash']) {
 
 test('--init fish output parses under fish -n', (t) => {
   if (spawnSync('fish', ['-c', 'true'], { stdio: 'ignore' }).error) return t.skip('fish not installed');
-  const r = spawnSync('fish', ['-n', '/dev/stdin'], { input: run(['--init', 'fish']).stdout, encoding: 'utf8' });
+  // fish wants a script *file*. `fish -n /dev/stdin` reads the pipe on macOS
+  // but not on Linux, where it exits 127 with "Error reading script file" —
+  // which is how this passed for a year and then failed the first time the
+  // suite ran on CI. zsh and bash take the snippet on stdin quite happily.
+  const script = join(sandbox, 'init.fish');
+  writeFileSync(script, run(['--init', 'fish']).stdout);
+  const r = spawnSync('fish', ['-n', script], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
 });
 
