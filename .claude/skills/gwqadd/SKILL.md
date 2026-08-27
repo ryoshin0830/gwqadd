@@ -73,14 +73,31 @@ gwqadd -n --json --from "${base:-main}" feat/x
 Read `base.ref` and `base.sha` back from the result and tell the user what the
 branch was cut from.
 
+## When the branch name is not the point
+
+For an isolated worktree whose branch name nobody will read — a scratch
+checkout, a parallel build, somewhere to try a risky change — do not invent a
+name:
+
+```bash
+gwqadd --random -n --json --from <base>
+```
+
+This is the only naming path that works without a terminal. It runs no AI, asks
+nothing, and returns a three-word name such as `plume-melting-bearskin` in the
+usual JSON, with `"named":"random"` so you can tell it apart from a name you
+chose. `--random` together with an explicit branch name is an error.
+
+Use a real name when the branch will be pushed, reviewed or discussed.
+
 ## The interactive naming help is not for you
 
-Run without a branch name and without a TTY, gwqadd exits 1 (`E_VALIDATION`) —
-it does **not** prompt, and it does **not** invoke an AI. That is deliberate:
-the describe-and-confirm flow exists for a human at a terminal.
+Run without a branch name, without `--random` and without a TTY, gwqadd exits 1
+(`E_VALIDATION`) — it does **not** prompt, and it does **not** invoke an AI.
+That is deliberate: the describe-and-confirm flow exists for a human at a
+terminal.
 
-So always pass the branch name. You are the one naming it; if you want ideas,
-generate them yourself and pass the result. Do not try to reach the naming flow
+So pass the branch name, or pass `--random`. Do not try to reach the naming flow
 by allocating a pty, and do not set `GWQADD_AI` expecting it to fire — with a
 name on the command line it never runs.
 
@@ -102,12 +119,15 @@ existing branch, that is a signal you should have used `gwqcd` or `gwqpull`.
   "base":          { "ref": "main", "sha": "8f2c1a9…" },
   "repo":          { "root": "/Users/alice/ghq/github.com/alice/api", "name": "api" },
   "created":       "branch+worktree",
+  "named":         "argument",
   "cd":            false
 }
 ```
 
 - `path` — where the work should happen. Use `git -C "<path>" …`.
 - `created` — `branch+worktree`, `worktree` (branch already existed) or `none`.
+- `named` — how the name was chosen: `argument` (you passed it), `random`
+  (`--random` generated it), or `ai` / `manual` from the interactive flow.
 - `repo.root` — the main working tree; **not** where you should work.
 
 Parse with `jq -r .path`. Tolerate unknown fields — the schema allows additive

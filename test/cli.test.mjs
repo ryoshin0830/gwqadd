@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   mkdtempSync, writeFileSync, chmodSync, rmSync, mkdirSync,
-  existsSync, readdirSync, realpathSync,
+  existsSync, readdirSync, realpathSync, readFileSync, copyFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -155,6 +155,38 @@ test('--init fish output parses under fish -n', (t) => {
 
 test('--cmd renames the emitted function', () => {
   assert.match(run(['--init', 'zsh', '--cmd', 'gwa']).stdout, /^gwa\(\) \{/m);
+});
+
+// ── generated word lists ─────────────────────────────────────────────────────
+//
+// The arrays are parsed out of the source rather than imported: bin/gwqadd.mjs
+// runs main() at load, so importing it would run the CLI. This is also the
+// regression test for I23 — a hand-edit that bypasses tools/build-words.mjs
+// shows up here as a wrong count, a duplicate or a stray character.
+const source = readFileSync(BIN, 'utf8');
+
+function wordList(name) {
+  const m = source.match(new RegExp(`const ${name} = \\[([^\\]]*)\\]`));
+  assert.ok(m, `${name} not found in bin/gwqadd.mjs`);
+  return m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
+}
+
+test('the generated word lists have the shape the generator assumes', () => {
+  for (const [name, count, shape] of [
+    ['ADJECTIVES', 216, /^[a-z]{3,9}$/],
+    ['GERUNDS', 109, /^[a-z]{5,10}$/],
+    ['NOUNS', 407, /^[a-z]{3,9}$/],
+  ]) {
+    const words = wordList(name);
+    assert.equal(words.length, count, `${name}: expected ${count} words`);
+    assert.equal(new Set(words).size, count, `${name}: duplicates`);
+    assert.deepEqual([...words].sort(), words, `${name}: not sorted`);
+    for (const w of words) assert.match(w, shape, `${name}: ${w}`);
+  }
+  assert.deepEqual(
+    wordList('GERUNDS').filter((w) => !w.endsWith('ing')), [],
+    'every gerund ends in ing',
+  );
 });
 
 // ── validation ───────────────────────────────────────────────────────────────
@@ -549,4 +581,175 @@ test('re-sourcing is idempotent even with a stale function defined', (t) => {
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^gwqadd \d+\.\d+\.\d+/m, 'the new function must have replaced the stale one');
   assert.doesNotMatch(r.stderr, /cd:|no such file/);
+});
+
+// ── random names ─────────────────────────────────────────────────────────────
+
+const RANDOM_SHAPE = /^[a-z]{3,9}-[a-z]{5,10}-[a-z]{3,9}$/;
+
+test('--random names and creates a branch with no terminal and no AI', () => {
+  const ai = canaryAi();
+  const r = spawnSync(process.execPath, [BIN, '--random', '--json', '-n'], {
+    encoding: 'utf8',
+    cwd: repo,
+    env: {
+      ...process.env, PATH: `${shimDir}:${process.env.PATH}`,
+      NO_COLOR: '1', GWQADD_AI: ai.bin, FORCE_COLOR: undefined,
+    },
+  });
+  const called = ai.called();
+  rmSync(ai.dir, { recursive: true, force: true });
+
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.match(j.branch, RANDOM_SHAPE);
+  assert.match(j.branch.split('-')[1], /ing$/, 'the middle word is a gerund');
+  assert.equal(j.named, 'random');
+  assert.equal(j.created, 'branch+worktree');
+  assert.equal(branchExists(j.branch), true);
+  assert.equal(called, false, 'a random name must never reach for an AI');
+
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  spawnSync('git', ['-C', repo, 'branch', '-D', j.branch]);
+});
+
+test('--random and an explicit branch name is a contradiction', () => {
+  const r = run(['--random', '--json', '-n', 'feat/explicit']);
+  assert.equal(r.status, 1);
+  assert.equal(jsonLine(r.stderr).error.code, 'E_VALIDATION');
+});
+
+test('--random and --no-random together is a contradiction', () => {
+  const r = run(['--random', '--no-random', '--json', '-n']);
+  assert.equal(r.status, 1);
+  assert.equal(jsonLine(r.stderr).error.code, 'E_VALIDATION');
+});
+
+test('an explicit branch name reports named=argument', () => {
+  const j = out(run(['--json', '-n', 'feat/named-arg']));
+  assert.equal(j.named, 'argument');
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  spawnSync('git', ['-C', repo, 'branch', '-D', 'feat/named-arg']);
+});
+
+// Shrinking the word lists in a *copy* of the CLI is how the reroll gets a
+// deterministic test without a test-only hook in the shipped code. The copy
+// needs a package.json one directory up, because bin/gwqadd.mjs reads its
+// version from `new URL('../package.json', import.meta.url)`.
+function cliWithWords(adj, ger, noun) {
+  const root = mkdtempSync(join(tmpdir(), 'gwqadd-words-'));
+  mkdirSync(join(root, 'bin'));
+  copyFileSync(join(dirname(BIN), '..', 'package.json'), join(root, 'package.json'));
+  const literal = (a) => `[${a.map((w) => `'${w}'`).join(', ')}]`;
+  const src = source
+    .replace(/const ADJECTIVES = \[[^\]]*\]/, `const ADJECTIVES = ${literal(adj)}`)
+    .replace(/const GERUNDS = \[[^\]]*\]/, `const GERUNDS = ${literal(ger)}`)
+    .replace(/const NOUNS = \[[^\]]*\]/, `const NOUNS = ${literal(noun)}`);
+  const bin = join(root, 'bin', 'gwqadd.mjs');
+  writeFileSync(bin, src);
+  return { root, bin };
+}
+
+const runCli = (bin, args) => {
+  const env = { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, NO_COLOR: '1' };
+  delete env.FORCE_COLOR;
+  return spawnSync(process.execPath, [bin, ...args], { encoding: 'utf8', cwd: repo, env });
+};
+
+test('a taken random name is rerolled, not offered', () => {
+  // Two possible names; one of them already exists, so only 'bb-humming-owl'
+  // is available. Ten independent picks all landing on the taken half would
+  // fail this — that is 1 in 1024, and is the price of testing the real
+  // generator instead of a stubbed one.
+  const { root, bin } = cliWithWords(['aa', 'bb'], ['humming'], ['owl']);
+  git(repo, 'branch', 'aa-humming-owl');
+
+  const r = runCli(bin, ['--random', '--json', '-n']);
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.equal(j.branch, 'bb-humming-owl');
+
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  spawnSync('git', ['-C', repo, 'branch', '-D', 'bb-humming-owl']);
+  gitTry(repo, 'branch', '-D', 'aa-humming-owl');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('exhausting the rerolls without a terminal is E_VALIDATION, not a hang', () => {
+  // One possible name, and it is taken. Every reroll must fail, and the
+  // non-interactive path cannot fall through to a prompt nobody can answer.
+  const { root, bin } = cliWithWords(['aa'], ['humming'], ['owl']);
+  git(repo, 'branch', 'aa-humming-owl');
+
+  const r = runCli(bin, ['--random', '--json', '-n']);
+  assert.equal(r.status, 1);
+  const err = jsonLine(r.stderr).error;
+  assert.equal(err.code, 'E_VALIDATION');
+  assert.match(err.message, /random name/);
+
+  gitTry(repo, 'branch', '-D', 'aa-humming-owl');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('a random name is skipped when a worktree holds it', () => {
+  // The end-to-end property a user cares about: a name already in use is never
+  // handed out. It is the branch check that catches this — a worktree cannot
+  // hold a name a branch does not (git prints `detached`, not a branch line,
+  // for a worktree without one), which is why freeRandomName only asks git
+  // about branches.
+  const { root, bin } = cliWithWords(['aa', 'bb'], ['humming'], ['owl']);
+  git(repo, 'branch', 'aa-humming-owl');
+  git(repo, 'worktree', 'add', join(wtBase, 'aa-humming-owl'), 'aa-humming-owl');
+
+  const r = runCli(bin, ['--random', '--json', '-n']);
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.equal(j.branch, 'bb-humming-owl');
+
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', join(wtBase, 'aa-humming-owl')]);
+  gitTry(repo, 'branch', '-D', 'aa-humming-owl');
+  gitTry(repo, 'branch', '-D', 'bb-humming-owl');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('--no-random leaves the non-interactive contract exactly as it was', () => {
+  const ai = canaryAi();
+  const r = spawnSync(process.execPath, [BIN, '--no-random', '--json'], {
+    encoding: 'utf8',
+    cwd: repo,
+    env: {
+      ...process.env, PATH: `${shimDir}:${process.env.PATH}`,
+      NO_COLOR: '1', GWQADD_AI: ai.bin, FORCE_COLOR: undefined,
+    },
+  });
+  const called = ai.called();
+  rmSync(ai.dir, { recursive: true, force: true });
+  assert.equal(r.status, 1);
+  assert.equal(jsonLine(r.stderr).error.code, 'E_VALIDATION');
+  assert.equal(called, false);
+});
+
+test('GWQADD_RANDOM=off is accepted and changes nothing non-interactively', () => {
+  const env = {
+    ...process.env, PATH: `${shimDir}:${process.env.PATH}`,
+    NO_COLOR: '1', GWQADD_RANDOM: 'off',
+  };
+  delete env.FORCE_COLOR;
+  const r = spawnSync(process.execPath, [BIN, '--json', '-n', 'feat/env-off'], {
+    encoding: 'utf8', cwd: repo, env,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.equal(j.branch, 'feat/env-off');
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  spawnSync('git', ['-C', repo, 'branch', '-D', 'feat/env-off']);
+});
+
+test('--help documents the random path and how to turn it off', () => {
+  const h = run(['--help']).stdout;
+  assert.match(h, /--random/);
+  assert.match(h, /--no-random/);
+  assert.match(h, /GWQADD_RANDOM/);
+  assert.match(h, /reroll/);
 });

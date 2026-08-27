@@ -4,3 +4,5 @@ CLAUDE.md
 .github/
 test/
 *.tgz
+tools/
+docs/

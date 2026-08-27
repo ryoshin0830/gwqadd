@@ -226,15 +226,23 @@ The branch prompt uses `node:readline/promises`, not a prompt library; the
 confirm uses the raw-mode keypress reader already present. No `fzf` and no `jq`
 either — this is the lightest tool in the family, and it should stay that way.
 
-### I15. The naming layer is interactive-only
+### I15. The naming layer is interactive-only, except `--random`
 
 `composeBranchName()` runs when **and only when** there is no positional and
 `isNonInteractive` is false. A branch name on the command line is the user
 speaking; never second-guess it, and never let a script or an agent trigger a
 prompt, a subprocess or a network round trip it did not ask for.
 
+`--random` is the one exception, and it is one because it breaks none of that:
+generating a name is arithmetic over a constant array — no prompt, no
+subprocess, no network — and the flag is explicit, so nothing happens that the
+caller did not ask for by name. `gwqadd --random` therefore works without a
+terminal. Bare `gwqadd` with no positional and no terminal still dies with
+`E_VALIDATION`, and that half is still tested.
+
 Both halves are tested with a canary "AI" that records its own invocation, so
-the absence is provable rather than assumed. Keep those tests.
+the absence is provable rather than assumed. `--random` is in those tests too.
+Keep them.
 
 ### I16. Delegate to an installed AI CLI; never embed an API client
 
@@ -276,6 +284,13 @@ a prefix the repo already uses. Verified: in a repo using `bugfix/`, a Japanese
 description produced `bugfix/expired-session-accepted` — not `fix/…`.
 
 Do not reintroduce the menu. If the model picks badly, improve the prompt.
+
+This applies to the AI path. The random path emits no prefix at all — a random
+name carries no information, so a `feat/` in front of it would claim a category
+nobody chose. It is the only naming path in this tool that ignores the
+repository's convention, and the shape is the point: three hyphenated words with
+no slash is not a shape a person types, so `git branch` output separates real
+branches from scratch worktrees at a glance.
 
 ### I19. One confirmation, and "no" goes back to the description
 
@@ -330,6 +345,45 @@ in Japanese will type Japanese there, and git would happily create a branch
 named in Japanese that no CI, URL or completion wants. The message points at the
 two things that do work — describe it at the previous prompt, or pass a name as
 an argument to use it verbatim.
+
+### I23. The word lists are generated, and their provenance is recorded
+
+`tools/build-words.mjs` is the only way `ADJECTIVES`, `GERUNDS` and `NOUNS` are
+produced. Hand-editing them drifts the counts from the recipe and quietly
+discards the licence trail. The script is a maintainer tool: it is in
+`.npmignore`, it is absent from `files`, and nothing at install or run time
+calls it.
+
+Adjectives and nouns come from glitchdotcom/friendly-words (MIT (c) 2018 Glitch,
+notice reproduced in `LICENSE`); gerunds from dariusk/corpora (CC0). VADER (MIT)
+filters tone and dwyl/english-words (Unlicense) filters spelling, both at build
+time only — neither is shipped.
+
+The counts match `claude -w` (216 x 109 x 407 = 9,582,408). **The words do not.**
+Lifting 732 hand-curated words out of a proprietary binary into an MIT package
+is a licence question with no upside. There is a test asserting the counts, the
+sort order, uniqueness and the character classes; it is the regression test for
+a hand-edit.
+
+### I24. A random name is checked before it is offered, never after
+
+`claude -w` lets a collision become a hard error telling the user to pass a
+different name. `freeRandomName()` rerolls instead, so the confirmation prompt
+can never propose something that cannot be created. Ten failures means our
+randomness is broken, not the user's luck — without a terminal that is
+`E_VALIDATION`, with one it falls through to `typeItYourself()`.
+
+Asking git about **branches is enough**, and a `worktreePath()` call beside it
+would be dead code: `git worktree list --porcelain` prints `branch
+refs/heads/<name>` only for a worktree that has that branch checked out, and
+`detached` for one without a branch. A name a worktree holds is therefore always
+a name a branch holds. This was verified against git, and the first draft
+carried the redundant call until the test written for it could not be made to
+fail.
+
+Both the reroll and the exhaustion path are tested by running a copy of the CLI
+whose word lists have been shrunk to one or two words. Keep that helper: it is
+what lets the real generator be tested without a test hook in shipped code.
 
 ---
 
@@ -414,6 +468,11 @@ Not covered — run by hand:
 | AI disabled | `gwqadd --no-ai` | no description prompt at all |
 | Non-ASCII fallback | at the ASCII prompt, type Japanese | refused with advice, not slugified |
 | Messy model output | `GWQADD_AI='printf %s\\n 1)\\ feat/a'` | the numbering is stripped |
+| Random name | `gwqadd` | a three-word name appears instantly, no AI runs |
+| Random, then reroll | `gwqadd`, press `r` a few times | a new name each time, instantly |
+| Random, then AI | `gwqadd`, press `n` | the description prompt, then the AI |
+| Random off | `gwqadd --no-random` | straight to the description prompt |
+| Random for scripts | `gwqadd --random -n --json` | creates without asking, `"named":"random"` |
 | Real gwq layout | `gwqadd feat/x` in a ghq repo | lands under gwq's `worktree.basedir` |
 | `--expires` | `gwqadd tmp/x --expires 1h` | gwq records the expiry |
 | Submodules | in a repo with submodules | submodules populated |
@@ -430,6 +489,8 @@ Not covered — run by hand:
 - `.claude/skills/gwqadd/SKILL.md` — agent USE contract.
 - `README.md` — end-user docs.
 - `test/cli.test.mjs` — real-git sandbox tests.
+- `tools/build-words.mjs` — regenerates the three word lists. Not shipped.
+- `docs/superpowers/` — design docs and implementation plans. Not shipped.
 
 ---
 
@@ -448,4 +509,8 @@ Not covered — run by hand:
 - **Pushing or setting upstream.** `git push -u` is one command and the user
   may not want the branch published yet.
 - **Cloning.** That is `gwqpull`. Keep the split.
+- **A `--words` file or `GWQADD_WORDS` override.** The shape of a random branch
+  name should be predictable to anyone reading `git branch`.
+- **`--expires` defaulting on for random names.** A random name suggests a
+  throwaway, but expiry is destructive-adjacent policy and stays explicit.
 - **Telemetry / analytics.**
