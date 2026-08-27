@@ -1,0 +1,62 @@
+name: publish
+
+# Releases are still cut locally — `npm version <patch|minor|major>` then
+# `git push --follow-tags`. This workflow is what turns that tag into a
+# published package, using npm trusted publishing (OIDC) so that no token with
+# publish rights ever exists on a laptop or in this repository's secrets. That
+# matters here: CLAUDE.md refuses install scripts because of the Shai-Hulud
+# worm, and a long-lived publish token on disk is the other half of that same
+# attack.
+#
+# One-time setup per package, on npmjs.com → package → Settings → Trusted
+# Publisher: GitHub Actions, owner `ryoshin0830`, this repository, workflow
+# filename `publish.yml`, allowed action `npm publish`.
+#
+# workflow_dispatch is deliberate: a tag pushed before this workflow existed,
+# or a re-run after a transient registry failure, would otherwise mean deleting
+# and re-pushing a tag that is already public.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # the OIDC token npm authenticates the publish with
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: npm must be new enough for trusted publishing
+        run: |
+          have=$(npm --version)
+          printf '%s\n%s\n' 11.5.1 "$have" | sort -V -C \
+            || { echo "npm $have is older than the 11.5.1 trusted publishing needs"; exit 1; }
+          echo "npm $have"
+
+      # The suite skips any shell it cannot find and every interactive test when
+      # `expect` is missing, so without this step the release gate quietly stops
+      # checking --init and the whole naming flow.
+      - name: Install the shells and the pty the suite needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh expect
+          # fish lives in universe; it is the one the suite can afford to skip.
+          sudo apt-get install -y fish || echo "fish unavailable — its --init test will skip"
+
+      # No `npm ci`: this package has zero dependencies (I12) and deliberately
+      # carries no lockfile, so there is nothing to install.
+      - run: npm test
+
+      # prepublishOnly runs the suite again plus `npm pack --dry-run` and
+      # --help. No NODE_AUTH_TOKEN — OIDC is the credential.
+      - run: npm publish

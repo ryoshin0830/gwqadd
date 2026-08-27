@@ -409,17 +409,35 @@ what lets the real generator be tested without a test hook in shipped code.
 git add -A && git commit -m "feat: …"
 npm pack --dry-run          # must not contain .claude/, CLAUDE.md, test/, .git/
 npm version patch           # or minor / major — commits and tags
-git push --follow-tags
-npm publish --registry=https://registry.npmjs.org
+git push --follow-tags      # the tag fires .github/workflows/publish.yml
+gh run watch                # optional; the publish happens in CI
 npm view gwqadd version
 npx -y gwqadd@latest --version
 ```
 
-`prepublishOnly` runs `npm test && npm pack --dry-run && node bin/gwqadd.mjs --help`.
+**Do not run `npm publish` by hand.** The tag is the release trigger, and CI
+publishes with npm trusted publishing (OIDC): there is no npm token on any
+laptop and none in this repository's secrets. A publish-capable token sitting
+in `~/.npmrc` is exactly what the worm this file already worries about goes
+looking for, and it is also the thing that made every release need a browser
+and a passkey.
 
-Publishing needs `registry.npmjs.org` credentials and a browser OTP round.
-If the machine's `.npmrc` points `registry=` at a private mirror, the
-`--registry` flag above is not optional.
+`prepublishOnly` runs `npm test && npm pack --dry-run && node bin/gwqadd.mjs --help`,
+in CI as well as locally.
+
+One-time setup per package, on npmjs.com → the package → Settings → Trusted
+Publisher: GitHub Actions, owner `ryoshin0830`, this repository, workflow
+filename `publish.yml`, allowed action `npm publish`. Nothing to rotate
+afterwards — OIDC tokens are minted per run and expire with it.
+
+A tag that was pushed before the workflow existed, or a run that died on a
+transient registry error, is re-run with `gh workflow run publish.yml` rather
+than by deleting and re-pushing a public tag.
+
+The developer machine's `.npmrc` points `registry=` at a private mirror, which
+is why anything run locally against npmjs.org still needs
+`--registry=https://registry.npmjs.org`. CI has no such mirror, so the workflow
+does not pass it.
 
 ---
 
