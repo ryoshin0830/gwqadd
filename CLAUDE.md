@@ -444,6 +444,14 @@ Five properties, all required, all tested:
   rule would then believe the `.env` is there. "Turned off" is not a failure, so
   it gets its own field rather than an `error` string.
 
+The source is realpathed at the entry of `seedIgnoredFiles()`. Here it arrives
+from `git worktree list` and is already resolved, so this is insurance — but it
+keeps this function identical to gwqpull's, where `ghq list -p` hands over an
+unresolved path and a symlinked ghq root turned **both** worktree guards off at
+once, copying the new worktree into itself 50 levels deep. The rule that follows
+from it holds in both tools: a path from git and a path we assembled ourselves
+are never compared without `realpathSync` on both sides.
+
 `cpSync` runs with `verbatimSymlinks: true`. Its default resolves a symlink
 before copying, which turns `.secrets/bin/key -> ../real/key` into an absolute
 path back into the main working tree — a worktree quietly wired to another

@@ -760,7 +760,19 @@ function regenerableDir(entry) {
 //   - never fail the command. A worktree missing its .env is worse than one
 //     with it, but a worktree that was never created is worse than both, so
 //     every failure here is a warning (cf. the naming layer, I22).
-function seedIgnoredFiles(sourceDir, destinationDir) {
+function seedIgnoredFiles(sourceDirIn, destinationDir) {
+  // Resolve the source too. `destinationRoot` is realpathed below and git prints
+  // resolved paths in `worktree list`, so a source that arrives unresolved makes
+  // every path comparison in here compare two spellings of the same place and
+  // answer "no" — which turns **both** worktree guards off at once and lets the
+  // worktree being created be copied into itself. Here the source comes from `git worktree list` and is already resolved; the call is insurance, and keeps this function identical to gwqpull's.
+  let sourceDir = sourceDirIn;
+  try {
+    sourceDir = realpathSync(sourceDirIn);
+  } catch {
+    // Keep what we were given: a source we cannot resolve is a source we
+    // cannot copy from either, and the listing below will say so.
+  }
   // `error` carries a listing failure into --json, where warn() is silent and
   // {copied:0,kept:0,skipped:0} is otherwise indistinguishable from a
   // repository that simply has no ignored files.
