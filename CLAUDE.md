@@ -419,17 +419,40 @@ Four properties, all required, all tested:
 The copy also runs on the "worktree already exists" path, so a worktree made
 before this feature picks its files up on the next `gwqadd`.
 
-`node_modules` and build output are in scope on purpose — the decision was
-"copy everything ignored", not "guess which ignored files matter". That makes
-the operation slow enough to need narration: there is a counter on a TTY, and
-`copied N ignored file(s)` afterwards. A silent multi-minute pause reads as a
-hang for the same reason I16's eight seconds did.
+### I25b. Dependency and build directories are excluded by name
 
-The sharp edge of that scope is the "worktree already exists" path: filling in
-only what is missing in a worktree that has its own `node_modules` interleaves
-two installs. Documented in the README rather than special-cased, because a
-denylist of "regenerable" directory names is exactly the guessing this decision
-rejected.
+The first draft copied **everything** ignored, on the principle that guessing
+which ignored files matter is not our business. Two measurements killed it: in
+the reporter's monorepo 394 of 514 ignored paths were under `node_modules`, and
+filling in only what is missing in a worktree that has its own install
+interleaves two dependency trees — worse than an empty one. A `.next` cache
+carries absolute paths and is wrong the moment it moves.
+
+So `REGENERABLE_DIRS` excludes a path whose **parent components** contain one of
+46 names. Only parents count: a file called `dist` is a file.
+
+There is no honest signal to use instead, and this was checked:
+
+- `git ls-files --others --ignored --exclude-standard --directory` collapses
+  wholly-ignored directories, but `.secrets/` — which holds the credential the
+  reporter needed — collapses exactly like `node_modules/`.
+- A size or entry-count budget answers differently depending on whether anyone
+  has run `npm install` lately, so the same repository behaves two ways.
+
+That leaves the name, which is a denylist, which is incomplete by construction.
+Two things keep it honest and both are tested: the list is reproduced verbatim
+in `--help`, and every run reports `skipped N in <dirs>`. An exclusion nobody
+can see is a silent surprise the first time a project keeps something real in
+`dist/`.
+
+The list is sorted, unique, and parsed out of the source by the test — the same
+trick I23 uses for the word lists, and the regression test for a hand-edit that
+adds a name without documenting it. Keep `REGENERABLE_DIRS` a plain array for
+that reason; the `Set` beside it is what the lookup uses.
+
+Deliberately **not** excluded: `.bundle`, `.idea`, `.vscode`. They are ignored
+config, not build output, and a project that needs `.bundle/config` needs it in
+every worktree.
 
 `gwqpull` carries the same behaviour, sharing the implementation by copy rather
 than by dependency (I12).

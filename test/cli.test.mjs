@@ -195,6 +195,22 @@ test('the generated word lists have the shape the generator assumes', () => {
   );
 });
 
+// ── the exclusion list ───────────────────────────────────────────────────────
+
+test('every excluded directory name is listed in --help', () => {
+  const names = wordList('REGENERABLE_DIRS');
+  assert.ok(names.length > 20, `only ${names.length} names parsed`);
+  assert.deepEqual([...names].sort(), names, 'REGENERABLE_DIRS is not sorted');
+  assert.equal(new Set(names).size, names.length, 'REGENERABLE_DIRS has duplicates');
+
+  // An exclusion nobody can read is a silent surprise the first time a project
+  // keeps something real in one of these. --help is where it has to be visible.
+  const help = run(['--help']).stdout;
+  for (const name of names) {
+    assert.ok(help.includes(name), `--help does not mention ${name}`);
+  }
+});
+
 // ── validation ───────────────────────────────────────────────────────────────
 
 test('outside a repository exits 2 with E_NOT_REPO', () => {
@@ -911,6 +927,46 @@ function seedIgnored(dir) {
   writeFileSync(join(dir, 'ignored-dir', 'nested.txt'), 'nested ignored\n');
 }
 
+// Everything a package manager or a build tool would put back on its own.
+function seedRegenerable(dir) {
+  writeFileSync(join(dir, '.gitignore'),
+    '.env\nignored-dir/\nnode_modules/\n.venv/\ndist/\nwebsite/.next/\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-qm', 'ignore rules');
+  for (const [d, f] of [
+    ['node_modules/pkg', 'index.js'],
+    ['.venv/lib', 'site.py'],
+    ['dist', 'bundle.js'],
+    ['website/.next/cache', 'chunk.js'],
+  ]) {
+    mkdirSync(join(dir, d), { recursive: true });
+    writeFileSync(join(dir, d, f), 'regenerable\n');
+  }
+  writeFileSync(join(dir, '.env'), 'TOKEN=main-working-tree\n');
+  mkdirSync(join(dir, 'ignored-dir'), { recursive: true });
+  writeFileSync(join(dir, 'ignored-dir', 'nested.txt'), 'nested ignored\n');
+}
+
+test('dependency and build directories are skipped, config files are not', () => {
+  seedRegenerable(repo);
+  const j = out(run(['--json', '-n', 'feat/x']));
+
+  assert.equal(readFileSync(join(j.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.equal(readFileSync(join(j.path, 'ignored-dir', 'nested.txt'), 'utf8'), 'nested ignored\n');
+  for (const p of ['node_modules', '.venv', 'dist', 'website/.next']) {
+    assert.ok(!existsSync(join(j.path, p)), `${p} must not be copied`);
+  }
+  assert.deepEqual(j.ignoredFiles, { copied: 2, kept: 0, skipped: 4 });
+});
+
+test('the skipped directories are named on stderr', () => {
+  seedRegenerable(repo);
+  const r = run(['-n', '--quiet', 'feat/x']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /skipped 4/);
+  assert.match(r.stderr, /node_modules/);
+});
+
 test('ignored files are copied into the new worktree by default', () => {
   seedIgnored(repo);
   const j = out(run(['--json', '-n', 'feat/x']));
@@ -955,10 +1011,10 @@ test('a file the worktree already has is kept, not overwritten', () => {
 test('--json reports what the copy did', () => {
   seedIgnored(repo);
   const first = out(run(['--json', '-n', 'feat/x']));
-  assert.deepEqual(first.ignoredFiles, { copied: 2, kept: 0 });
+  assert.deepEqual(first.ignoredFiles, { copied: 2, kept: 0, skipped: 0 });
 
   const second = out(run(['--json', '-n', 'feat/x']));
-  assert.deepEqual(second.ignoredFiles, { copied: 0, kept: 2 });
+  assert.deepEqual(second.ignoredFiles, { copied: 0, kept: 2, skipped: 0 });
 });
 
 test('--copy-ignored-files and --no-copy-ignored-files together is a contradiction', () => {
@@ -975,4 +1031,8 @@ test('--help documents the ignored-file copy and how to turn it off', () => {
   const r = run(['--help']);
   assert.match(r.stdout, /--no-copy-ignored-files/);
   assert.match(r.stdout, /ignored/i);
+  // The exclusion list is only honest if it is written down where it is used.
+  assert.match(r.stdout, /node_modules/);
+  assert.match(r.stdout, /\.venv/);
+  assert.match(r.stdout, /\.terraform/);
 });

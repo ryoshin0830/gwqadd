@@ -198,24 +198,35 @@ $ gwqadd feat/login
 │ repo    api  /Users/alice/ghq/github.com/alice/api
 │ base    main 8f2c1a9
 │ copying ignored files from /Users/alice/ghq/github.com/alice/api
-│ copied 37 ignored file(s)
+│ copied 6 ignored file(s), skipped 41932 in node_modules, .next
 └ ✓ feat/login → /Users/alice/worktrees/github.com/alice/api/feat-login
 ```
 
 The source is the **main working tree**, not the worktree you happen to be
-standing in: ignored files belong to the repository, not to a branch. Everything
-`git ls-files --others --ignored` reports is in scope, `node_modules` and build
-output included, so a big tree takes a moment — there is a counter while it
-runs.
+standing in: ignored files belong to the repository, not to a branch.
+
+Dependency and build directories are **not** copied. They are reproducible from
+what git does track, and copying one is slow and frequently wrong — a `.next`
+cache carries absolute paths, and a half-filled `node_modules` is worse than an
+empty one. git has no idea which ignored paths are regenerable: `--directory`
+only tells you a directory is ignored as a whole, and that is just as true of
+`.secrets/`, while a size budget would give a different answer on every machine.
+So the exclusion is by name, the list is fixed, and every run says how many
+files it skipped and which of these they were in:
+
+```
+.angular  .astro  .cache  .dart_tool  .direnv  .docusaurus  .eggs  .gradle
+.mypy_cache  .next  .nuxt  .nyc_output  .output  .parcel-cache  .pnpm-store
+.pytest_cache  .ruff_cache  .sass-cache  .serverless  .stack-work
+.svelte-kit  .terraform  .terragrunt-cache  .tox  .turbo  .venv
+.virtualenvs  .vite  .yarn  Carthage  Pods  __pycache__  _build
+bower_components  build  coverage  deps  dist  jspm_packages  node_modules
+out  site-packages  target  tmp  vendor  venv
+```
 
 Nothing is overwritten and nothing is deleted, so an `.env` you edited inside a
 worktree stays yours and re-running is a no-op. A copy that fails is a warning,
 never a failed run: the worktree is created either way.
-
-One consequence worth knowing: re-running on a worktree that already has its own
-`node_modules` fills in only what is missing, which mixes two installs. That is
-harmless for `.env` and awkward for a dependency tree, so reinstall there if
-anything looks strange — or pass `--no-copy-ignored-files` for that run.
 
 `--no-copy-ignored-files` turns it off. `--copy-ignored-files` is the default
 and is accepted so a script can say so out loud.
