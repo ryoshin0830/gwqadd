@@ -169,8 +169,9 @@ there is no terminal. Scripts and agents keep the plain, silent contract.
 1. Work out which repository you are in — any worktree of it will do.
 2. Create the branch and its worktree. If the branch already exists, create
    just the worktree. If both exist, go there.
-3. `git submodule update --init --recursive` when the tree has submodules.
-4. Hand the path back so the shell can `cd` there.
+3. Copy the Git-ignored files it does not have yet from the main working tree.
+4. `git submodule update --init --recursive` when the tree has submodules.
+5. Hand the path back so the shell can `cd` there.
 
 Re-running is safe.
 
@@ -182,6 +183,37 @@ Re-running is safe.
 - A branch **`gwqadd` created** *is* rolled back if the worktree could not be
   made — otherwise `git worktree add -b`'s half-finished state would turn every
   later attempt into `branch already exists`.
+- The ignored-file copy never overwrites and never deletes. A file the new
+  worktree already has is left exactly as it is.
+
+## Your .env comes with you
+
+A fresh worktree has everything git tracks and nothing it does not, which means
+no `.env`, no credentials, no local config — nothing the project needs to
+actually run. So they are copied over:
+
+```console
+$ gwqadd feat/login
+┌ gwqadd api
+│ repo    api  /Users/alice/ghq/github.com/alice/api
+│ base    main 8f2c1a9
+│ copying ignored files from /Users/alice/ghq/github.com/alice/api
+│ copied 37 ignored file(s)
+└ ✓ feat/login → /Users/alice/worktrees/github.com/alice/api/feat-login
+```
+
+The source is the **main working tree**, not the worktree you happen to be
+standing in: ignored files belong to the repository, not to a branch. Everything
+`git ls-files --others --ignored` reports is in scope, `node_modules` and build
+output included, so a big tree takes a moment — there is a counter while it
+runs.
+
+Nothing is overwritten and nothing is deleted, so an `.env` you edited inside a
+worktree stays yours and re-running is a no-op. A copy that fails is a warning,
+never a failed run: the worktree is created either way.
+
+`--no-copy-ignored-files` turns it off. `--copy-ignored-files` is the default
+and is accepted so a script can say so out loud.
 
 ## Usage
 
@@ -200,6 +232,7 @@ gwqadd [options] [<branch>]
 | `--random` | skip the questions and generate a name |
 | `--no-random` | start by describing the work instead of rolling a name |
 | `--no-submodules` | skip `git submodule update --init --recursive` |
+| `--no-copy-ignored-files` | do not copy the repository's Git-ignored files across |
 | `-f`, `--force` | move a colliding worktree directory aside instead of failing |
 | `-n`, `--no-cd` | do the work and report the path, but do not move the shell |
 | `--json` | stdout = 1-line JSON |

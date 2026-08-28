@@ -18,8 +18,9 @@ its worktree in whatever repository the user is standing in:
 2. Take the branch name from the positional, or from one question plus an
    AI suggestion the user confirms (interactive only).
 3. Create branch + worktree, or just the worktree, or neither.
-4. `git submodule update --init --recursive` when `.gitmodules` exists.
-5. Print the path; `--init <shell>` emits a function so the *shell* cds.
+4. Copy the main working tree's Git-ignored files into the new worktree.
+5. `git submodule update --init --recursive` when `.gitmodules` exists.
+6. Print the path; `--init <shell>` emits a function so the *shell* cds.
 
 Single source of behavior: `bin/gwqadd.mjs`.
 
@@ -385,6 +386,48 @@ Both the reroll and the exhaustion path are tested by running a copy of the CLI
 whose word lists have been shrunk to one or two words. Keep that helper: it is
 what lets the real generator be tested without a test hook in shipped code.
 
+### I25. Ignored files come from the main working tree, and cannot fail the run
+
+A worktree gets what git tracks and nothing else, so it starts with no `.env`,
+no credentials and no local config — unable to run the project it is a checkout
+of. `seedIgnoredFiles()` copies everything `git ls-files --others --ignored
+--exclude-standard` reports, and it is **on by default**; `--no-copy-ignored-files`
+turns it off and `--copy-ignored-files` is accepted so a script can be explicit.
+Both together is `E_VALIDATION`.
+
+Four properties, all required, all tested:
+
+- **The source is `repo.root`, not cwd.** G1 deliberately takes the *base* from
+  the cwd's HEAD; the ignored files go the other way, because they belong to the
+  repository rather than to whichever branch you were standing on. A user who
+  edited `.env` inside worktree A does not thereby make it the template for
+  worktree B. The source path is printed, for the same reason I6 prints the base.
+- **Missing-only, never destructive.** A path the destination already has is
+  counted as kept and left alone: an `.env` edited in a worktree is the user's,
+  and re-running has to stay a no-op. Nothing is ever overwritten or deleted.
+- **The write cannot leave the destination.** The list comes from the
+  filesystem, so every entry is checked lexically (`isWithin`) *and* against
+  symlinked parents (`hasSymlinkInPath`) before mkdir and again after — mkdir
+  can follow a link that appeared in between. A rejected entry is skipped, not
+  fatal.
+- **It never blocks.** Every failure — unreadable source, a symlinked parent, a
+  full disk — warns and carries on, exactly as the naming layer does (I22). A
+  worktree without its `.env` is worse than one with it; a worktree that was
+  never created is worse than both. This is also why a copy failure does not
+  trigger the I3 rollback: by then the worktree exists and is fine.
+
+The copy also runs on the "worktree already exists" path, so a worktree made
+before this feature picks its files up on the next `gwqadd`.
+
+`node_modules` and build output are in scope on purpose — the decision was
+"copy everything ignored", not "guess which ignored files matter". That makes
+the operation slow enough to need narration: there is a counter on a TTY, and
+`copied N ignored file(s)` afterwards. A silent multi-minute pause reads as a
+hang for the same reason I16's eight seconds did.
+
+`gwqpull` carries the same behaviour, sharing the implementation by copy rather
+than by dependency (I12).
+
 ---
 
 ## Do NOT
@@ -508,6 +551,8 @@ Not covered — run by hand:
 | Real gwq layout | `gwqadd feat/x` in a ghq repo | lands under gwq's `worktree.basedir` |
 | `--expires` | `gwqadd tmp/x --expires 1h` | gwq records the expiry |
 | Submodules | in a repo with submodules | submodules populated |
+| Ignored copy, big tree | a repo with `node_modules` installed | a counter moves, then `copied N ignored file(s)` |
+| Ignored copy, from a worktree | `gwqadd feat/x` inside worktree A | the printed source is the main clone, not A |
 | npx one-shot | `npx gwqadd feat/x` | box on terminal, `c` copies the cd command |
 | Stdout separation | `gwqadd feat/x > out.txt` | box on terminal, `out.txt` empty |
 

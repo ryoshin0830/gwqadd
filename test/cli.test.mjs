@@ -897,3 +897,82 @@ test('--help documents the random path and how to turn it off', () => {
   assert.match(h, /GWQADD_RANDOM/);
   assert.match(h, /reroll/);
 });
+
+// ── ignored files ────────────────────────────────────────────────────────────
+
+// Ignore rules live in HEAD so every worktree agrees on them; the ignored files
+// themselves are only ever in a working tree, which is the whole problem.
+function seedIgnored(dir) {
+  writeFileSync(join(dir, '.gitignore'), '.env\nignored-dir/\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-qm', 'ignore rules');
+  writeFileSync(join(dir, '.env'), 'TOKEN=main-working-tree\n');
+  mkdirSync(join(dir, 'ignored-dir'), { recursive: true });
+  writeFileSync(join(dir, 'ignored-dir', 'nested.txt'), 'nested ignored\n');
+}
+
+test('ignored files are copied into the new worktree by default', () => {
+  seedIgnored(repo);
+  const j = out(run(['--json', '-n', 'feat/x']));
+  assert.equal(readFileSync(join(j.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.equal(readFileSync(join(j.path, 'ignored-dir', 'nested.txt'), 'utf8'), 'nested ignored\n');
+});
+
+test('ordinary untracked files are not copied', () => {
+  seedIgnored(repo);
+  writeFileSync(join(repo, 'notes.txt'), 'ordinary untracked\n');
+  const j = out(run(['--json', '-n', 'feat/x']));
+  assert.ok(!existsSync(join(j.path, 'notes.txt')), 'untracked but not ignored must stay out');
+});
+
+test('--no-copy-ignored-files leaves the new worktree without them', () => {
+  seedIgnored(repo);
+  const j = out(run(['--json', '-n', '--no-copy-ignored-files', 'feat/x']));
+  assert.ok(!existsSync(join(j.path, '.env')), '--no-copy-ignored-files must copy nothing');
+  assert.ok(!existsSync(join(j.path, 'ignored-dir')));
+});
+
+test('the copy source is the main working tree, not the worktree we stand in', () => {
+  seedIgnored(repo);
+  const linked = join(wtBase, 'linked');
+  git(repo, 'worktree', 'add', '-q', '-b', 'side', linked);
+  writeFileSync(join(linked, '.env'), 'TOKEN=linked-worktree\n');
+
+  const j = out(run(['--json', '-n', 'feat/x'], { cwd: linked }));
+  assert.equal(readFileSync(join(j.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+});
+
+test('a file the worktree already has is kept, not overwritten', () => {
+  seedIgnored(repo);
+  const first = out(run(['--json', '-n', 'feat/x']));
+  writeFileSync(join(first.path, '.env'), 'TOKEN=edited-in-worktree\n');
+
+  const second = out(run(['--json', '-n', 'feat/x']));
+  assert.equal(second.created, 'none');
+  assert.equal(readFileSync(join(second.path, '.env'), 'utf8'), 'TOKEN=edited-in-worktree\n');
+});
+
+test('--json reports what the copy did', () => {
+  seedIgnored(repo);
+  const first = out(run(['--json', '-n', 'feat/x']));
+  assert.deepEqual(first.ignoredFiles, { copied: 2, kept: 0 });
+
+  const second = out(run(['--json', '-n', 'feat/x']));
+  assert.deepEqual(second.ignoredFiles, { copied: 0, kept: 2 });
+});
+
+test('--copy-ignored-files and --no-copy-ignored-files together is a contradiction', () => {
+  const r = run(['--json', '--copy-ignored-files', '--no-copy-ignored-files', 'feat/x']);
+  assert.equal(r.status, 1);
+  const err = jsonLine(r.stderr).error;
+  assert.equal(err.code, 'E_VALIDATION');
+  // Not parseArgs rejecting an unknown flag: both spellings must be known.
+  assert.match(err.message, /--copy-ignored-files/);
+  assert.match(err.message, /--no-copy-ignored-files/);
+});
+
+test('--help documents the ignored-file copy and how to turn it off', () => {
+  const r = run(['--help']);
+  assert.match(r.stdout, /--no-copy-ignored-files/);
+  assert.match(r.stdout, /ignored/i);
+});
