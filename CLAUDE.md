@@ -444,6 +444,10 @@ Five properties, all required, all tested:
   rule would then believe the `.env` is there. "Turned off" is not a failure, so
   it gets its own field rather than an `error` string.
 
+Resolve for comparisons, print what the caller handed us: the progress line and
+the error message use the source as it arrived, so they agree with `repo.root`
+in `--json`, and the resolved form never leaves the function.
+
 The source is realpathed at the entry of `seedIgnoredFiles()`. Here it arrives
 from `git worktree list` and is already resolved, so this is insurance — but it
 keeps this function identical to gwqpull's, where `ghq list -p` hands over an
