@@ -224,9 +224,18 @@ bower_components  build  coverage  deps  dist  jspm_packages  node_modules
 out  site-packages  target  tmp  vendor  venv
 ```
 
+The worktrees of this repository are skipped as well — that one is not a
+guess but a reading of `git worktree list`, and it matters when gwq's basedir
+lives inside the repository, where worktrees would otherwise copy each other.
+
+Relative symlinks stay relative, so a copied `node_modules/.bin/tsc` does not
+end up pointing back into the main working tree.
+
 Nothing is overwritten and nothing is deleted, so an `.env` you edited inside a
 worktree stays yours and re-running is a no-op. A copy that fails is a warning,
-never a failed run: the worktree is created either way.
+never a failed run: the worktree is created either way. In `--json` that trouble
+is reported in the payload instead — the copy did its job when
+`ignoredFiles.error` is null and `ignoredFiles.failed` is 0.
 
 `--no-copy-ignored-files` turns it off. `--copy-ignored-files` is the default
 and is accepted so a script can say so out loud.
@@ -248,7 +257,8 @@ gwqadd [options] [<branch>]
 | `--random` | skip the questions and generate a name |
 | `--no-random` | start by describing the work instead of rolling a name |
 | `--no-submodules` | skip `git submodule update --init --recursive` |
-| `--no-copy-ignored-files` | do not copy the repository's Git-ignored files across |
+| `--copy-ignored-files` | copy the repository's Git-ignored files in (the default) |
+| `--no-copy-ignored-files` | do not copy them |
 | `-f`, `--force` | move a colliding worktree directory aside instead of failing |
 | `-n`, `--no-cd` | do the work and report the path, but do not move the shell |
 | `--json` | stdout = 1-line JSON |

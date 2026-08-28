@@ -395,7 +395,7 @@ of. `seedIgnoredFiles()` copies everything `git ls-files --others --ignored
 turns it off and `--copy-ignored-files` is accepted so a script can be explicit.
 Both together is `E_VALIDATION`.
 
-Four properties, all required, all tested:
+Five properties, all required, all tested:
 
 - **The source is `repo.root`, not cwd.** G1 deliberately takes the *base* from
   the cwd's HEAD; the ignored files go the other way, because they belong to the
@@ -415,6 +415,18 @@ Four properties, all required, all tested:
   worktree without its `.env` is worse than one with it; a worktree that was
   never created is worse than both. This is also why a copy failure does not
   trigger the I3 rollback: by then the worktree exists and is fine.
+- **It reports its own trouble.** `ignoredFiles` carries `failed` and `error`
+  precisely because the run still exits 0. `warn()` is silent in `--json`
+  (I1/I10), so without those fields a caller cannot tell "this repository has no
+  ignored files" from "the copy did nothing at all". The rule to document, and
+  the one SKILL.md gives agents, is: the copy did its job iff `error` is null
+  and `failed` is 0.
+
+`cpSync` runs with `verbatimSymlinks: true`. Its default resolves a symlink
+before copying, which turns `node_modules/.bin/tsc -> ../typescript/bin/tsc`
+into an absolute path back into the main working tree — a worktree quietly wired
+to another checkout. A relative link inside a tree being copied is part of that
+tree; keep it as it is.
 
 The copy also runs on the "worktree already exists" path, so a worktree made
 before this feature picks its files up on the next `gwqadd`.
@@ -429,7 +441,18 @@ interleaves two dependency trees — worse than an empty one. A `.next` cache
 carries absolute paths and is wrong the moment it moves.
 
 So `REGENERABLE_DIRS` excludes a path whose **parent components** contain one of
-46 names. Only parents count: a file called `dist` is a file.
+46 names, at any depth. Only parents count: a file called `dist` is a file.
+
+**This repository's own worktrees are excluded too, and that one is not a
+guess.** With gwq's basedir inside the repository — `worktree.basedir =
+.worktrees`, gitignored — every worktree is an ignored directory of the
+repository, and git reports a wholly-ignored directory as one indivisible entry.
+So each run copies the other worktrees wholesale into the new one, a level
+deeper every time; measured before the fix, files under `.worktrees` went
+4 → 12 → 28 over three runs with nesting 15 components deep, and the only thing
+stopping the recursion was cpSync's own "cannot copy to a subdirectory of self".
+`ownWorktrees()` reads `git worktree list --porcelain`, so this is a structural
+fact rather than another name on the list.
 
 There is no honest signal to use instead, and this was checked:
 
@@ -456,6 +479,36 @@ every worktree.
 
 `gwqpull` carries the same behaviour, sharing the implementation by copy rather
 than by dependency (I12).
+
+### I25c. The listing must never be truncated
+
+`spawnSync`'s default `maxBuffer` is 1 MiB. `git ls-files --others --ignored
+--exclude-standard -z` is bounded by the **total length of the path names**, so
+any repository that has had `npm install` run in it goes past it. Measured:
+
+| ignored entries | `-z` bytes | before the fix |
+| --- | --- | --- |
+| 3,002 | 876 KB | `{copied:2,…}`, `.env` lands |
+| 8,002 | 2.3 MB | `status:null signal:SIGTERM error:ENOBUFS`, **nothing copied** |
+
+Truncation surfaced as `status !== 0`, which fell into the "could not list the
+ignored files" warning — and in `--json` that warning is silent, so the whole
+feature disappeared without a trace, `.env` included. `git()` therefore passes
+`maxBuffer: 512 * 1024 * 1024` for every call.
+
+**I25b does not save this.** Pruning happens after git returns, so the listing
+dies first. The threshold sits around 15,000–25,000 ignored entries; a fresh
+`create-next-app` is about 25,000, which puts an ordinary JS project on the
+wrong side of it.
+
+The test builds a fixture whose listing exceeds 1 MiB on purpose and asserts
+`.env` still arrives. It is the one automated test that covers the central risk
+of having taken `node_modules` into scope at all — the harness's own `git()`
+helper needed the same `maxBuffer` to measure the fixture, which is how loudly
+this fails.
+
+The listing failure now names the reason (`ENOBUFS`, a signal, or the exit
+code). "Could not list" without it was indistinguishable from an empty result.
 
 ---
 
@@ -582,6 +635,8 @@ Not covered — run by hand:
 | Submodules | in a repo with submodules | submodules populated |
 | Ignored copy, big tree | a repo with `node_modules` installed | a counter moves, then `copied N ignored file(s)` |
 | Ignored copy, from a worktree | `gwqadd feat/x` inside worktree A | the printed source is the main clone, not A |
+| Ignored copy, huge listing | a repo with `npm install` run in it | `.env` still arrives; `ignoredFiles.error` is null (I25c) |
+| Ignored copy, basedir inside the repo | `worktree.basedir = .worktrees`, gitignored | `skipped N in worktrees of this repository`, no nesting |
 | npx one-shot | `npx gwqadd feat/x` | box on terminal, `c` copies the cd command |
 | Stdout separation | `gwqadd feat/x > out.txt` | box on terminal, `out.txt` empty |
 

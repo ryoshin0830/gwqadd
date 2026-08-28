@@ -120,7 +120,8 @@ existing branch, that is a signal you should have used `gwqcd` or `gwqpull`.
   "repo":          { "root": "/Users/alice/ghq/github.com/alice/api", "name": "api" },
   "created":       "branch+worktree",
   "named":         "argument",
-  "ignoredFiles":  { "copied": 6, "kept": 0, "skipped": 41932 },
+  "ignoredFiles":  { "copied": 6, "kept": 0, "skipped": 41932,
+                     "failed": 0, "error": null },
   "cd":            false
 }
 ```
@@ -135,9 +136,11 @@ existing branch, that is a signal you should have used `gwqcd` or `gwqpull`.
   kept, and how many were `skipped` for living in a dependency or build
   directory (`node_modules`, `.venv`, `dist`, … — `gwqadd --help` lists all 46).
   This happens by default; pass `--no-copy-ignored-files` to skip it. Nothing is
-  ever overwritten, and a failed copy is a warning, so a non-zero `exitCode`
-  never means "the copy failed". **The new worktree has no `node_modules`** —
-  run the project's install step there before building or testing.
+  ever overwritten. **The copy did its job iff `error` is null and `failed` is
+  0** — it never affects `exitCode`, and in `--json` this is the only place its
+  trouble is reported, so check it rather than the exit code or stderr.
+  **The new worktree has no `node_modules`** — run the project's install step
+  there before building or testing.
 
 Parse with `jq -r .path`. Tolerate unknown fields — the schema allows additive
 growth.
