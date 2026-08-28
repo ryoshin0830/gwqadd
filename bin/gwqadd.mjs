@@ -911,7 +911,8 @@ function seedIgnoredFiles(sourceDirIn, destinationDir) {
       // verbatimSymlinks: a relative link is a link within the tree being
       // copied. Resolving it, which is cpSync's default, rewrites
       // `.secrets/bin/key -> ../real/key` into an absolute path back into
-      // the main working tree. (Not a node_modules example: I25b never copies those.)
+      // the main working tree. (Not a node_modules example: I25b never
+      // copies those.)
       cpSync(sourcePath, destinationPath,
         { recursive: true, force: false, verbatimSymlinks: true });
       result.copied++;
