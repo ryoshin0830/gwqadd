@@ -137,9 +137,8 @@ IGNORED FILES
   basedir is inside the repository, where each of those is a full checkout that
   would otherwise be copied into every new worktree.
 
-  The set of files is whatever \`git ls-files --others --ignored
-  --exclude-standard\` reports, which includes .git/info/exclude and the
-  machine's global core.excludesFile, not only .gitignore.
+  The set is whatever git itself ignores, which is not only .gitignore: it
+  includes .git/info/exclude and the machine's global core.excludesFile.
 
   Nothing is ever overwritten or deleted: a file the destination already has is
   left exactly as it is, so re-running is safe and an .env you edited in a
