@@ -169,8 +169,9 @@ there is no terminal. Scripts and agents keep the plain, silent contract.
 1. Work out which repository you are in — any worktree of it will do.
 2. Create the branch and its worktree. If the branch already exists, create
    just the worktree. If both exist, go there.
-3. `git submodule update --init --recursive` when the tree has submodules.
-4. Hand the path back so the shell can `cd` there.
+3. Copy the Git-ignored files it does not have yet from the main working tree.
+4. `git submodule update --init --recursive` when the tree has submodules.
+5. Hand the path back so the shell can `cd` there.
 
 Re-running is safe.
 
@@ -182,6 +183,69 @@ Re-running is safe.
 - A branch **`gwqadd` created** *is* rolled back if the worktree could not be
   made — otherwise `git worktree add -b`'s half-finished state would turn every
   later attempt into `branch already exists`.
+- The ignored-file copy never overwrites and never deletes. A file the new
+  worktree already has is left exactly as it is.
+
+## Your .env comes with you
+
+A fresh worktree has everything git tracks and nothing it does not, which means
+no `.env`, no credentials, no local config — nothing the project needs to
+actually run. So they are copied over:
+
+```console
+$ gwqadd feat/login
+┌ gwqadd api
+│ repo    api  /Users/alice/ghq/github.com/alice/api
+│ base    main 8f2c1a9
+│ copying ignored files from /Users/alice/ghq/github.com/alice/api
+│ copied 6 ignored file(s), skipped 41932 in node_modules, .next
+└ ✓ feat/login → /Users/alice/worktrees/github.com/alice/api/feat-login
+```
+
+The source is the **main working tree**, not the worktree you happen to be
+standing in: ignored files belong to the repository, not to a branch. "Ignored"
+means whatever `git ls-files --others --ignored --exclude-standard` reports, so
+`.git/info/exclude` and your machine's global `core.excludesFile` count too.
+
+Dependency and build directories are **not** copied. They are reproducible from
+what git does track, and copying one is slow and frequently wrong — a `.next`
+cache carries absolute paths, and a half-filled `node_modules` is worse than an
+empty one. git has no idea which ignored paths are regenerable: `--directory`
+only tells you a directory is ignored as a whole, and that is just as true of
+`.secrets/`, while a size budget would give a different answer on every machine.
+So the exclusion is by name, the list is fixed, and every run says how many
+files it skipped and which of these they were in:
+
+```
+.angular  .astro  .cache  .dart_tool  .direnv  .docusaurus  .eggs  .gradle
+.mypy_cache  .next  .nuxt  .nyc_output  .output  .parcel-cache  .pnpm-store
+.pytest_cache  .ruff_cache  .sass-cache  .serverless  .stack-work
+.svelte-kit  .terraform  .terragrunt-cache  .tox  .turbo  .venv
+.virtualenvs  .vite  .yarn  Carthage  Pods  __pycache__  _build
+bower_components  build  coverage  deps  dist  jspm_packages  node_modules
+out  site-packages  target  tmp  vendor  venv
+```
+
+The worktrees of this repository are skipped as well — that one is not a
+guess but a reading of `git worktree list`, and it matters when gwq's basedir
+lives inside the repository, where worktrees would otherwise copy each other.
+
+Everything else sitting in the directory gwq puts worktrees in is skipped too — a
+`.bak-` this tool moved aside with `-f`, or a worktree whose `.git` file went
+missing — because each of those is another full checkout of the repository.
+
+Relative symlinks stay relative, so a copied `.secrets/bin/key -> ../real/key`
+does not end up pointing back into the main working tree.
+
+Nothing is overwritten and nothing is deleted, so an `.env` you edited inside a
+worktree stays yours and re-running is a no-op. A copy that fails is a warning,
+never a failed run: the worktree is created either way. In `--json` that trouble
+is reported in the payload instead — the copy did its job when
+`ignoredFiles.enabled` is true, `ignoredFiles.error` is null and
+`ignoredFiles.failed` is 0.
+
+`--no-copy-ignored-files` turns it off. `--copy-ignored-files` is the default
+and is accepted so a script can say so out loud.
 
 ## Usage
 
@@ -200,6 +264,8 @@ gwqadd [options] [<branch>]
 | `--random` | skip the questions and generate a name |
 | `--no-random` | start by describing the work instead of rolling a name |
 | `--no-submodules` | skip `git submodule update --init --recursive` |
+| `--copy-ignored-files` | copy the repository's Git-ignored files in (the default) |
+| `--no-copy-ignored-files` | do not copy them |
 | `-f`, `--force` | move a colliding worktree directory aside instead of failing |
 | `-n`, `--no-cd` | do the work and report the path, but do not move the shell |
 | `--json` | stdout = 1-line JSON |

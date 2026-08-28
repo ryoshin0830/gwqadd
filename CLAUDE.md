@@ -18,8 +18,9 @@ its worktree in whatever repository the user is standing in:
 2. Take the branch name from the positional, or from one question plus an
    AI suggestion the user confirms (interactive only).
 3. Create branch + worktree, or just the worktree, or neither.
-4. `git submodule update --init --recursive` when `.gitmodules` exists.
-5. Print the path; `--init <shell>` emits a function so the *shell* cds.
+4. Copy the main working tree's Git-ignored files into the new worktree.
+5. `git submodule update --init --recursive` when `.gitmodules` exists.
+6. Print the path; `--init <shell>` emits a function so the *shell* cds.
 
 Single source of behavior: `bin/gwqadd.mjs`.
 
@@ -31,7 +32,7 @@ you are in; `gwqpull` fetches a repo from a remote; `gwqcd` only navigates.**
 
 ## Facts about gwq v0.1.1 this design is built on
 
-All four were verified empirically before a line was written. If a gwq upgrade
+All five were verified empirically before a line was written. If a gwq upgrade
 changes any of them, the corresponding code here is wrong, not merely stale.
 
 ### G1. `gwq add -b` branches from the HEAD of its cwd
@@ -62,6 +63,21 @@ the same note.
 
 Also worth knowing: an **empty** destination directory is fine — git accepts it.
 Only a non-empty one collides, so do not treat mere existence as a conflict.
+
+### G5. gwq will tell you its basedir
+
+`gwq config get worktree.basedir` works on v0.1.1 (commit c424773) and prints
+the configured value — `~/worktrees` here, **unexpanded** — exiting 0 even with
+an empty `HOME` and `XDG_CONFIG_HOME`, where it falls back to the default. An
+unknown key exits 1 with a message, so success is distinguishable.
+
+Recorded because I25b once claimed the opposite, as the reason for not widening
+the worktree pruning, and review caught it. Three real reasons to still not use
+it: the `~` needs expanding, the answer is the *configured* basedir rather than
+where this worktree actually went (the naming template sits in between), and it
+is another gwq start-up on every run. "There is no interface" collapses the
+moment someone runs `gwq config get --help`, where this is the first example;
+"there is an interface and here is why we do not use it" does not.
 
 ---
 
@@ -385,6 +401,196 @@ Both the reroll and the exhaustion path are tested by running a copy of the CLI
 whose word lists have been shrunk to one or two words. Keep that helper: it is
 what lets the real generator be tested without a test hook in shipped code.
 
+### I25. Ignored files come from the main working tree, and cannot fail the run
+
+A worktree gets what git tracks and nothing else, so it starts with no `.env`,
+no credentials and no local config — unable to run the project it is a checkout
+of. `seedIgnoredFiles()` copies everything `git ls-files --others --ignored
+--exclude-standard` reports, and it is **on by default**; `--no-copy-ignored-files`
+turns it off and `--copy-ignored-files` is accepted so a script can be explicit.
+Both together is `E_VALIDATION`.
+
+Five properties, all required, all tested:
+
+- **The source is `repo.root`, not cwd.** G1 deliberately takes the *base* from
+  the cwd's HEAD; the ignored files go the other way, because they belong to the
+  repository rather than to whichever branch you were standing on. A user who
+  edited `.env` inside worktree A does not thereby make it the template for
+  worktree B. The source path is printed, for the same reason I6 prints the base.
+- **Missing-only, never destructive.** A path the destination already has is
+  counted as kept and left alone: an `.env` edited in a worktree is the user's,
+  and re-running has to stay a no-op. Nothing is ever overwritten or deleted.
+- **The write cannot leave the destination.** The list comes from the
+  filesystem, so every entry is checked lexically (`isWithin`) *and* against
+  symlinked parents (`hasSymlinkInPath`) before mkdir and again after — mkdir
+  can follow a link that appeared in between. A rejected entry is skipped, not
+  fatal.
+- **It never blocks.** Every failure — unreadable source, a symlinked parent, a
+  full disk — warns and carries on, exactly as the naming layer does (I22). A
+  worktree without its `.env` is worse than one with it; a worktree that was
+  never created is worse than both. This is also why a copy failure does not
+  trigger the I3 rollback: by then the worktree exists and is fine.
+- **It reports its own trouble.** `ignoredFiles` carries `failed`, `error` and
+  `enabled` precisely because the run still exits 0. `warn()` is silent in
+  `--json` (I1/I10), so without those fields a caller cannot tell "this
+  repository has no ignored files" from "the copy did nothing at all". The rule
+  to document, and the one SKILL.md gives agents, is: the copy did its job iff
+  `enabled` is true, `error` is null and `failed` is 0.
+
+  `enabled` was added in review, for the case the first two fields cannot
+  express: `--no-copy-ignored-files` produced
+  `{copied:0,kept:0,skipped:0,failed:0,error:null}`, byte-identical to a
+  successful copy in a repository with nothing to copy. An agent following the
+  rule would then believe the `.env` is there. "Turned off" is not a failure, so
+  it gets its own field rather than an `error` string.
+
+Resolve for comparisons, print what the caller handed us: the progress line and
+the error message use the source as it arrived, so they agree with `repo.root`
+in `--json`, and the resolved form never leaves the function.
+
+The source is realpathed at the entry of `seedIgnoredFiles()`. Here it arrives
+from `git worktree list` and is already resolved, so this is insurance — but it
+keeps this function identical to gwqpull's, where `ghq list -p` hands over an
+unresolved path and a symlinked ghq root turned **both** worktree guards off at
+once, copying the new worktree into itself 50 levels deep. The rule that follows
+from it holds in both tools: a path from git and a path we assembled ourselves
+are never compared without `realpathSync` on both sides.
+
+`cpSync` runs with `verbatimSymlinks: true`. Its default resolves a symlink
+before copying, which turns `.secrets/bin/key -> ../real/key` into an absolute
+path back into the main working tree — a worktree quietly wired to another
+checkout. A relative link inside a tree being copied is part of that tree; keep
+it as it is.
+
+The example used to be `node_modules/.bin/tsc`, which review pointed out is
+unreachable: I25b never copies `node_modules`. The flag still matters for the
+ignored directories that *are* copied — `.secrets`, `.direnv`-style config.
+
+The copy also runs on the "worktree already exists" path, so a worktree made
+before this feature picks its files up on the next `gwqadd`.
+
+### I25b. Dependency and build directories are excluded by name
+
+The first draft copied **everything** ignored, on the principle that guessing
+which ignored files matter is not our business. Two measurements killed it: in
+the reporter's monorepo 394 of 514 ignored paths were under `node_modules`, and
+filling in only what is missing in a worktree that has its own install
+interleaves two dependency trees — worse than an empty one. A `.next` cache
+carries absolute paths and is wrong the moment it moves.
+
+So `REGENERABLE_DIRS` excludes a path whose **parent components** contain one of
+46 names, at any depth. Only parents count: a file called `dist` is a file.
+
+**This repository's own worktrees are excluded too, and that one is not a
+guess.** With gwq's basedir inside the repository — `worktree.basedir =
+.worktrees`, gitignored — every worktree is an ignored directory of the
+repository, and git reports a wholly-ignored directory as one indivisible entry.
+So each run copies the other worktrees wholesale into the new one, a level
+deeper every time; measured before the fix, files under `.worktrees` went
+4 → 12 → 28 over three runs with nesting 15 components deep, and the only thing
+stopping the recursion was cpSync's own "cannot copy to a subdirectory of self".
+`ownWorktrees()` reads `git worktree list --porcelain`, so this is a structural
+fact rather than another name on the list.
+
+**The worktree list alone was not enough**, and the hole was found in review.
+git knows only the *live* worktrees; what sits beside them in the basedir is an
+ordinary ignored directory and a full checkout of the repository:
+
+- a `<path>.bak-<timestamp>` this tool moved aside itself under `-f` (I4);
+- a worktree whose `.git` file went missing — and `main()` runs
+  `git worktree prune` before the copy, so that entry is already deregistered by
+  the time `ownWorktrees()` looks.
+
+Measured: with a `.bak-` leftover in place, every later run copied a whole
+checkout — `.env` included — into the new worktree, 14 → 21 → 28 files, and the
+deregistered case brought its own nested copy along (10 files in one run). So
+`dirname(destinationRoot)` — **the directory the destination sits in** — is
+pruned wholesale. `samePath(holder, sourceDir)` guards a basedir at the
+repository root, where pruning the holder would prune everything.
+
+That is one level, not gwq's basedir, and the difference matters when the naming
+template nests: with `{{.Host}}/{{.Owner}}/{{.Repository}}/{{.Branch}}` the
+holder is `…/<repo>`, so a leftover higher up — `.worktrees/old-checkout/` — is
+still copied. Review measured it, and left it: reaching that state needs the
+template to have changed under an existing worktree, while the alternative
+(prune the topmost ancestor between the repository and the destination) would
+eat a real config directory the moment someone points the basedir inside one.
+Asking gwq for its basedir looked like the honest fix, and this paragraph used
+to say there was no interface for it. There is — see G5 — and using it still
+would not help here: the leftovers this fix is about sit *beside* the
+destination, which one level already covers. Wording first, because "the
+directory gwq was told to put worktrees in" is also what this paragraph used to
+claim, and it is not what the code does.
+
+The direction of `isWithin(p, w)` in that loop looks backwards and is not:
+`worktrees` contains the **main working tree**, so `isWithin(w, p)` puts every
+entry inside it and prunes the lot (`copied 0`, `.env` gone — measured while
+reviewing). git collapses a healthy worktree into one entry, so `p === w` is the
+case that matters. Keep the comment; the "obvious fix" here is a regression.
+
+There is no honest signal to use instead, and this was checked:
+
+- `git ls-files --others --ignored --exclude-standard --directory` collapses
+  wholly-ignored directories, but `.secrets/` — which holds the credential the
+  reporter needed — collapses exactly like `node_modules/`.
+- A size or entry-count budget answers differently depending on whether anyone
+  has run `npm install` lately, so the same repository behaves two ways.
+
+That leaves the name, which is a denylist, which is incomplete by construction.
+Two things keep it honest and both are tested: the list is reproduced verbatim
+in `--help`, and every run reports `skipped N in <dirs>`. An exclusion nobody
+can see is a silent surprise the first time a project keeps something real in
+`dist/`.
+
+`skipped N` counts **entries**, which is what git listed: one file under
+`node_modules`, but one whole directory where git stops at a repository boundary,
+so a nested worktree counts once whatever it holds. The word in the summary is
+"entries" for that reason — the same number meaning two different things was
+noted in review, and the honesty this reporting is supposed to buy (see above)
+depends on the unit being stable.
+
+The list is sorted, unique, and parsed out of the source by the test — the same
+trick I23 uses for the word lists, and the regression test for a hand-edit that
+adds a name without documenting it. Keep `REGENERABLE_DIRS` a plain array for
+that reason; the `Set` beside it is what the lookup uses.
+
+Deliberately **not** excluded: `.bundle`, `.idea`, `.vscode`. They are ignored
+config, not build output, and a project that needs `.bundle/config` needs it in
+every worktree.
+
+`gwqpull` carries the same behaviour, sharing the implementation by copy rather
+than by dependency (I12).
+
+### I25c. The listing must never be truncated
+
+`spawnSync`'s default `maxBuffer` is 1 MiB. `git ls-files --others --ignored
+--exclude-standard -z` is bounded by the **total length of the path names**, so
+any repository that has had `npm install` run in it goes past it. Measured:
+
+| ignored entries | `-z` bytes | before the fix |
+| --- | --- | --- |
+| 3,002 | 876 KB | `{copied:2,…}`, `.env` lands |
+| 8,002 | 2.3 MB | `status:null signal:SIGTERM error:ENOBUFS`, **nothing copied** |
+
+Truncation surfaced as `status !== 0`, which fell into the "could not list the
+ignored files" warning — and in `--json` that warning is silent, so the whole
+feature disappeared without a trace, `.env` included. `git()` therefore passes
+`maxBuffer: 512 * 1024 * 1024` for every call.
+
+**I25b does not save this.** Pruning happens after git returns, so the listing
+dies first. The threshold sits around 15,000–25,000 ignored entries; a fresh
+`create-next-app` is about 25,000, which puts an ordinary JS project on the
+wrong side of it.
+
+The test builds a fixture whose listing exceeds 1 MiB on purpose and asserts
+`.env` still arrives. It is the one automated test that covers the central risk
+of having taken `node_modules` into scope at all — the harness's own `git()`
+helper needed the same `maxBuffer` to measure the fixture, which is how loudly
+this fails.
+
+The listing failure now names the reason (`ENOBUFS`, a signal, or the exit
+code). "Could not list" without it was indistinguishable from an empty result.
+
 ---
 
 ## Do NOT
@@ -508,6 +714,12 @@ Not covered — run by hand:
 | Real gwq layout | `gwqadd feat/x` in a ghq repo | lands under gwq's `worktree.basedir` |
 | `--expires` | `gwqadd tmp/x --expires 1h` | gwq records the expiry |
 | Submodules | in a repo with submodules | submodules populated |
+| Ignored copy, big tree | a repo with `node_modules` installed | a counter moves, then `copied N ignored file(s)` |
+| Ignored copy, from a worktree | `gwqadd feat/x` inside worktree A | the printed source is the main clone, not A |
+| Ignored copy, huge listing | a repo with `npm install` run in it | `.env` still arrives; `ignoredFiles.error` is null (I25c) |
+| Ignored copy, basedir inside the repo | `worktree.basedir = .worktrees`, gitignored | `skipped N entries in worktrees of this repository`, no nesting |
+| Ignored copy, leftover beside the worktrees | `-f` a collision, then `gwqadd` again | the `.bak-` is not copied into the new worktree |
+| Ignored copy, global excludes | `core.excludesFile` matching a local file | it is copied — `--exclude-standard` includes it |
 | npx one-shot | `npx gwqadd feat/x` | box on terminal, `c` copies the cd command |
 | Stdout separation | `gwqadd feat/x > out.txt` | box on terminal, `out.txt` empty |
 

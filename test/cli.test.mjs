@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import {
   mkdtempSync, writeFileSync, chmodSync, rmSync, mkdirSync,
   existsSync, readdirSync, realpathSync, readFileSync, copyFileSync,
+  symlinkSync, readlinkSync, renameSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -23,7 +24,9 @@ const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'gwqadd.m
 let sandbox, repo, wtBase, shimDir;
 
 const git = (cwd, ...args) => {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  // The harness needs the same headroom the CLI does: the ignored-file listing
+  // of the big-tree fixture is several MiB, and spawnSync truncates at 1 MiB.
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`);
   return (r.stdout ?? '').trim();
 };
@@ -56,7 +59,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 slug=$(printf '%s' "$branch" | tr '/' '-')
-wt="${wtBase}/$slug"
+wt="\${GWQADD_TEST_WTBASE:-${wtBase}}/$slug"
 if [ "$newbranch" = "1" ]; then
   # Mirrors git: the branch is created while preparing, so a destination
   # failure leaves the branch behind.
@@ -103,8 +106,10 @@ beforeEach(() => {
   git(repo, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
 });
 
-function run(args, { cwd = repo } = {}) {
-  const env = { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, NO_COLOR: '1' };
+function run(args, { cwd = repo, env: extra = {} } = {}) {
+  const env = {
+    ...process.env, PATH: `${shimDir}:${process.env.PATH}`, NO_COLOR: '1', ...extra,
+  };
   // We force NO_COLOR; node warns to stderr when FORCE_COLOR is also set, so a
   // developer who exports it would otherwise see phantom failures.
   delete env.FORCE_COLOR;
@@ -193,6 +198,22 @@ test('the generated word lists have the shape the generator assumes', () => {
     wordList('GERUNDS').filter((w) => !w.endsWith('ing')), [],
     'every gerund ends in ing',
   );
+});
+
+// ── the exclusion list ───────────────────────────────────────────────────────
+
+test('every excluded directory name is listed in --help', () => {
+  const names = wordList('REGENERABLE_DIRS');
+  assert.ok(names.length > 20, `only ${names.length} names parsed`);
+  assert.deepEqual([...names].sort(), names, 'REGENERABLE_DIRS is not sorted');
+  assert.equal(new Set(names).size, names.length, 'REGENERABLE_DIRS has duplicates');
+
+  // An exclusion nobody can read is a silent surprise the first time a project
+  // keeps something real in one of these. --help is where it has to be visible.
+  const help = run(['--help']).stdout;
+  for (const name of names) {
+    assert.ok(help.includes(name), `--help does not mention ${name}`);
+  }
 });
 
 // ── validation ───────────────────────────────────────────────────────────────
@@ -896,4 +917,281 @@ test('--help documents the random path and how to turn it off', () => {
   assert.match(h, /--no-random/);
   assert.match(h, /GWQADD_RANDOM/);
   assert.match(h, /reroll/);
+});
+
+// ── ignored files ────────────────────────────────────────────────────────────
+
+// Ignore rules live in HEAD so every worktree agrees on them; the ignored files
+// themselves are only ever in a working tree, which is the whole problem.
+function seedIgnored(dir) {
+  writeFileSync(join(dir, '.gitignore'), '.env\nignored-dir/\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-qm', 'ignore rules');
+  writeFileSync(join(dir, '.env'), 'TOKEN=main-working-tree\n');
+  mkdirSync(join(dir, 'ignored-dir'), { recursive: true });
+  writeFileSync(join(dir, 'ignored-dir', 'nested.txt'), 'nested ignored\n');
+}
+
+// Everything a package manager or a build tool would put back on its own.
+function seedRegenerable(dir) {
+  writeFileSync(join(dir, '.gitignore'),
+    '.env\nignored-dir/\nnode_modules/\n.venv/\ndist/\nwebsite/.next/\n');
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-qm', 'ignore rules');
+  for (const [d, f] of [
+    ['node_modules/pkg', 'index.js'],
+    ['.venv/lib', 'site.py'],
+    ['dist', 'bundle.js'],
+    ['website/.next/cache', 'chunk.js'],
+  ]) {
+    mkdirSync(join(dir, d), { recursive: true });
+    writeFileSync(join(dir, d, f), 'regenerable\n');
+  }
+  writeFileSync(join(dir, '.env'), 'TOKEN=main-working-tree\n');
+  mkdirSync(join(dir, 'ignored-dir'), { recursive: true });
+  writeFileSync(join(dir, 'ignored-dir', 'nested.txt'), 'nested ignored\n');
+}
+
+test('dependency and build directories are skipped, config files are not', () => {
+  seedRegenerable(repo);
+  const j = out(run(['--json', '-n', 'feat/x']));
+
+  assert.equal(readFileSync(join(j.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.equal(readFileSync(join(j.path, 'ignored-dir', 'nested.txt'), 'utf8'), 'nested ignored\n');
+  for (const p of ['node_modules', '.venv', 'dist', 'website/.next']) {
+    assert.ok(!existsSync(join(j.path, p)), `${p} must not be copied`);
+  }
+  assert.deepEqual(j.ignoredFiles, { copied: 2, kept: 0, skipped: 4, failed: 0, error: null, enabled: true });
+});
+
+test('the skipped directories are named on stderr', () => {
+  seedRegenerable(repo);
+  const r = run(['-n', '--quiet', 'feat/x']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /skipped 4/);
+  assert.match(r.stderr, /node_modules/);
+});
+
+test('ignored files are copied into the new worktree by default', () => {
+  seedIgnored(repo);
+  const j = out(run(['--json', '-n', 'feat/x']));
+  assert.equal(readFileSync(join(j.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.equal(readFileSync(join(j.path, 'ignored-dir', 'nested.txt'), 'utf8'), 'nested ignored\n');
+});
+
+test('ordinary untracked files are not copied', () => {
+  seedIgnored(repo);
+  writeFileSync(join(repo, 'notes.txt'), 'ordinary untracked\n');
+  const j = out(run(['--json', '-n', 'feat/x']));
+  assert.ok(!existsSync(join(j.path, 'notes.txt')), 'untracked but not ignored must stay out');
+});
+
+test('--no-copy-ignored-files leaves the new worktree without them', () => {
+  seedIgnored(repo);
+  const j = out(run(['--json', '-n', '--no-copy-ignored-files', 'feat/x']));
+  assert.ok(!existsSync(join(j.path, '.env')), '--no-copy-ignored-files must copy nothing');
+  assert.ok(!existsSync(join(j.path, 'ignored-dir')));
+});
+
+test('the copy source is the main working tree, not the worktree we stand in', () => {
+  seedIgnored(repo);
+  const linked = join(wtBase, 'linked');
+  git(repo, 'worktree', 'add', '-q', '-b', 'side', linked);
+  writeFileSync(join(linked, '.env'), 'TOKEN=linked-worktree\n');
+
+  const j = out(run(['--json', '-n', 'feat/x'], { cwd: linked }));
+  assert.equal(readFileSync(join(j.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+});
+
+test('a file the worktree already has is kept, not overwritten', () => {
+  seedIgnored(repo);
+  const first = out(run(['--json', '-n', 'feat/x']));
+  writeFileSync(join(first.path, '.env'), 'TOKEN=edited-in-worktree\n');
+
+  const second = out(run(['--json', '-n', 'feat/x']));
+  assert.equal(second.created, 'none');
+  assert.equal(readFileSync(join(second.path, '.env'), 'utf8'), 'TOKEN=edited-in-worktree\n');
+});
+
+test('--json reports what the copy did', () => {
+  seedIgnored(repo);
+  const first = out(run(['--json', '-n', 'feat/x']));
+  assert.deepEqual(first.ignoredFiles, { copied: 2, kept: 0, skipped: 0, failed: 0, error: null, enabled: true });
+
+  const second = out(run(['--json', '-n', 'feat/x']));
+  assert.deepEqual(second.ignoredFiles, { copied: 0, kept: 2, skipped: 0, failed: 0, error: null, enabled: true });
+});
+
+// The listing is the central risk of taking node_modules into scope: git prints
+// every path in it, and `spawnSync`'s default 1 MiB maxBuffer truncates that
+// with signal SIGTERM and error ENOBUFS — which used to land in the "could not
+// list" warning and copy nothing at all, .env included.
+test('a listing far past the default maxBuffer still copies the config files', () => {
+  writeFileSync(join(repo, '.gitignore'), '.env\nnode_modules/\n');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-qm', 'ignore rules');
+  writeFileSync(join(repo, '.env'), 'TOKEN=main-working-tree\n');
+  const deep = join(repo, 'node_modules',
+    Array.from({ length: 6 }, (_, i) => `pkg-with-a-fairly-long-directory-name-${i}`).join('/'));
+  mkdirSync(deep, { recursive: true });
+  for (let i = 0; i < 4200; i++) {
+    writeFileSync(join(deep, `module-file-with-a-long-name-${String(i).padStart(6, '0')}.js`), 'x');
+  }
+  const bytes = git(repo, 'ls-files', '--others', '--ignored', '--exclude-standard', '-z').length;
+  assert.ok(bytes > 1048576, `fixture only produced ${bytes} bytes, under the 1 MiB default`);
+
+  const j = out(run(['--json', '-n', 'feat/x']));
+  assert.equal(j.ignoredFiles.error, null, 'the listing must not fail');
+  assert.equal(readFileSync(join(j.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.equal(j.ignoredFiles.copied, 1);
+  assert.equal(j.ignoredFiles.skipped, 4200);
+});
+
+test('this repository\'s own worktrees are never copied', () => {
+  writeFileSync(join(repo, '.gitignore'), '.env\n.worktrees/\n');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-qm', 'ignore rules');
+  writeFileSync(join(repo, '.env'), 'TOKEN=main-working-tree\n');
+  // A worktree living inside the repository, which is what a gwq basedir set to
+  // `.worktrees` produces. git reports it as one indivisible ignored directory.
+  git(repo, 'worktree', 'add', '-q', '-b', 'side', join(repo, '.worktrees', 'side'));
+
+  const j = out(run(['--json', '-n', 'feat/x']));
+  assert.equal(readFileSync(join(j.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.ok(!existsSync(join(j.path, '.worktrees')),
+    'a worktree of this repository must not be copied into another worktree');
+});
+
+// `git worktree list` only knows live worktrees. Everything else beside them in
+// gwq's basedir — a .bak- this tool moved aside with -f, a worktree whose .git
+// file went missing and that our own `worktree prune` has just deregistered — is
+// an ignored directory like any other, and a full checkout of the repository.
+function worktreesInsideRepo() {
+  writeFileSync(join(repo, '.gitignore'), '.env\n.worktrees/\n');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-qm', 'ignore rules');
+  writeFileSync(join(repo, '.env'), 'TOKEN=main-working-tree\n');
+  return { env: { GWQADD_TEST_WTBASE: join(repo, '.worktrees') } };
+}
+
+test('a .bak- leftover beside the worktrees is not copied', () => {
+  const inside = worktreesInsideRepo();
+  const first = out(run(['--json', '-n', 'feat/one'], inside));
+  // Exactly what -f does to a collision (I4): moved aside, never deleted.
+  renameSync(first.path, `${first.path}.bak-20260828T120000Z`);
+  git(repo, 'worktree', 'prune');
+
+  const second = out(run(['--json', '-n', 'feat/two'], inside));
+  assert.equal(readFileSync(join(second.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.ok(!existsSync(join(second.path, '.worktrees')),
+    'a leftover checkout must not be copied into the new worktree');
+});
+
+test('a worktree our own prune just deregistered is not copied', () => {
+  const inside = worktreesInsideRepo();
+  const first = out(run(['--json', '-n', 'feat/one'], inside));
+  rmSync(join(first.path, '.git'), { force: true });
+
+  const second = out(run(['--json', '-n', 'feat/two'], inside));
+  assert.equal(readFileSync(join(second.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.ok(!existsSync(join(second.path, '.worktrees')),
+    'main() prunes first, so the entry is gone by the time the copy looks');
+});
+
+test('a healthy worktree beside the destination is still skipped, not copied', () => {
+  const inside = worktreesInsideRepo();
+  out(run(['--json', '-n', 'feat/one'], inside));
+
+  const second = out(run(['--json', '-n', 'feat/two'], inside));
+  assert.equal(readFileSync(join(second.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.ok(!existsSync(join(second.path, '.worktrees')));
+});
+
+test('--json distinguishes a copy that was turned off from one with nothing to do', () => {
+  seedIgnored(repo);
+  const off = out(run(['--json', '-n', '--no-copy-ignored-files', 'feat/x']));
+  assert.equal(off.ignoredFiles.enabled, false,
+    'an agent must not read "turned off" as "the .env is there"');
+
+  const on = out(run(['--json', '-n', 'feat/y']));
+  assert.equal(on.ignoredFiles.enabled, true);
+});
+
+test('a relative symlink stays relative instead of pointing at the main tree', () => {
+  writeFileSync(join(repo, '.gitignore'), 'ignored-dir/\n');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-qm', 'ignore rules');
+  mkdirSync(join(repo, 'ignored-dir', 'real'), { recursive: true });
+  mkdirSync(join(repo, 'ignored-dir', 'bin'), { recursive: true });
+  writeFileSync(join(repo, 'ignored-dir', 'real', 'tsc'), 'tsc\n');
+  symlinkSync(join('..', 'real', 'tsc'), join(repo, 'ignored-dir', 'bin', 'tsc'));
+
+  const j = out(run(['--json', '-n', 'feat/x']));
+  assert.equal(j.ignoredFiles.failed, 0, 'the link must copy cleanly');
+  assert.equal(readlinkSync(join(j.path, 'ignored-dir', 'bin', 'tsc')), join('..', 'real', 'tsc'),
+    'cpSync rewrites relative symlinks to absolute paths unless verbatimSymlinks is set');
+});
+
+test('the failure count is the real one, not the first hundred', (t) => {
+  if (process.getuid?.() === 0) return t.skip('chmod 000 does not restrain root');
+  writeFileSync(join(repo, '.gitignore'), 'locked/\n');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-qm', 'ignore rules');
+  mkdirSync(join(repo, 'locked'), { recursive: true });
+  const files = [];
+  for (let i = 0; i < 150; i++) {
+    const f = join(repo, 'locked', `f${String(i).padStart(3, '0')}.txt`);
+    writeFileSync(f, 'secret\n');
+    chmodSync(f, 0o000);
+    files.push(f);
+  }
+  try {
+    const j = out(run(['--json', '-n', 'feat/x']));
+    assert.equal(j.ignoredFiles.failed, 150);
+    assert.equal(j.ignoredFiles.copied, 0);
+  } finally {
+    for (const f of files) chmodSync(f, 0o644);
+  }
+});
+
+test('a destination blocked by a plain file is not called a symlink', () => {
+  writeFileSync(join(repo, '.gitignore'), 'ignored-dir/\n');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-qm', 'ignore rules');
+  mkdirSync(join(repo, 'ignored-dir'), { recursive: true });
+  writeFileSync(join(repo, 'ignored-dir', 'nested.txt'), 'nested\n');
+
+  const first = out(run(['--json', '-n', '--no-copy-ignored-files', 'feat/x']));
+  writeFileSync(join(first.path, 'ignored-dir'), 'a plain file in the way\n');
+
+  const r = run(['-n', '--quiet', 'feat/x']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /crosses a symlink/, 'nothing here is a symlink');
+  assert.match(r.stderr, /blocked/);
+});
+
+test('--copy-ignored-files and --no-copy-ignored-files together is a contradiction', () => {
+  const r = run(['--json', '--copy-ignored-files', '--no-copy-ignored-files', 'feat/x']);
+  assert.equal(r.status, 1);
+  const err = jsonLine(r.stderr).error;
+  assert.equal(err.code, 'E_VALIDATION');
+  // Not parseArgs rejecting an unknown flag: both spellings must be known.
+  assert.match(err.message, /--copy-ignored-files/);
+  assert.match(err.message, /--no-copy-ignored-files/);
+});
+
+test('--help documents the ignored-file copy and how to turn it off', () => {
+  const r = run(['--help']);
+  assert.match(r.stdout, /--no-copy-ignored-files/);
+  assert.match(r.stdout, /ignored/i);
+  // The exclusion list is only honest if it is written down where it is used.
+  assert.match(r.stdout, /node_modules/);
+  assert.match(r.stdout, /\.venv/);
+  assert.match(r.stdout, /\.terraform/);
+  // Both spellings belong in OPTIONS: a script author reads the table, not the
+  // prose, and --copy-ignored-files is there for scripts to be explicit with.
+  assert.match(r.stdout, /^\s+--copy-ignored-files\b/m);
+  assert.match(r.stdout, /^\s+--no-copy-ignored-files\b/m);
+  // The names match at any depth, which is worth saying out loud: conf/tmp/ goes.
+  assert.match(r.stdout, /any depth|at any depth|whatever the depth/i);
 });

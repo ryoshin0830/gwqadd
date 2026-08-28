@@ -5,10 +5,10 @@ import { parseArgs } from 'node:util';
 import { Buffer } from 'node:buffer';
 import {
   readFileSync, existsSync, readdirSync, renameSync, realpathSync,
-  mkdtempSync, rmSync,
+  mkdtempSync, rmSync, cpSync, lstatSync, mkdirSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join as joinPath } from 'node:path';
+import { join as joinPath, dirname, resolve as resolvePath, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 
@@ -38,6 +38,11 @@ OPTIONS
   --random           skip the questions and generate a name
   --no-random        start by describing the work instead of rolling a name
   --no-submodules    skip \`git submodule update --init --recursive\`
+  --copy-ignored-files
+                     copy the repository's Git-ignored files in — the default,
+                     accepted so a script can say so out loud
+  --no-copy-ignored-files
+                     do not copy them
   -f, --force        move a colliding worktree directory aside instead of failing
   -n, --no-cd        do the work and report the path, but do not move the shell
   --json             stdout = 1-line JSON
@@ -94,11 +99,54 @@ WHAT IT DOES
   1. work out which repository you are in (any worktree of it will do)
   2. create the branch and its worktree — or just the worktree if the branch
      already exists, or neither if both do
-  3. \`git submodule update --init --recursive\` when the tree has submodules
-  4. hand the path back so the shell can cd there
+  3. copy the Git-ignored files it does not have yet from the main working tree
+  4. \`git submodule update --init --recursive\` when the tree has submodules
+  5. hand the path back so the shell can cd there
 
   Re-running is safe. A half-created branch is rolled back rather than left
   to collide with the next attempt.
+
+IGNORED FILES
+  A worktree starts without the files git never tracked — .env, credentials,
+  local config — so it starts unable to run anything. They are copied over from
+  the main working tree, not from the worktree you happen to be standing in,
+  because they belong to the repository rather than to a branch.
+
+  Dependency and build directories are skipped: they are reproducible from what
+  git does track, and copying one is slow and often wrong. git cannot tell them
+  from an .env, so the exclusion is by name. It matches parent directories at
+  any depth, so conf/tmp/app.conf goes too, while a file called dist stays:
+
+    .angular  .astro  .cache  .dart_tool  .direnv  .docusaurus  .eggs
+    .gradle  .mypy_cache  .next  .nuxt  .nyc_output  .output
+    .parcel-cache  .pnpm-store  .pytest_cache  .ruff_cache  .sass-cache
+    .serverless  .stack-work  .svelte-kit  .terraform  .terragrunt-cache
+    .tox  .turbo  .venv  .virtualenvs  .vite  .yarn  Carthage  Pods
+    __pycache__  _build  bower_components  build  coverage  deps  dist
+    jspm_packages  node_modules  out  site-packages  target  tmp  vendor
+    venv
+
+  Every run says how many entries it skipped and which of these they were in.
+  An entry is a path git listed: one file under node_modules, but one whole
+  directory where git stops at a repository boundary — so a nested worktree
+  counts once, whatever it holds.
+
+  The worktrees of this repository are skipped as well, and so is everything
+  else sitting in the directory gwq puts worktrees in — a \`.bak-\` moved aside
+  by -f, or a worktree whose .git file went missing. That matters when gwq's
+  basedir is inside the repository, where each of those is a full checkout that
+  would otherwise be copied into every new worktree.
+
+  The set is whatever git itself ignores, which is not only .gitignore: it
+  includes .git/info/exclude and the machine's global core.excludesFile.
+
+  Nothing is ever overwritten or deleted: a file the destination already has is
+  left exactly as it is, so re-running is safe and an .env you edited in a
+  worktree stays yours. A copy that fails is a warning, not a failure — the
+  worktree is created either way.
+
+  --no-copy-ignored-files turns it off. --copy-ignored-files is the default and
+  is accepted so a script can say so out loud.
 
 OUTPUT
   Progress goes to stderr. stdout carries only the machine-readable result:
@@ -106,7 +154,16 @@ OUTPUT
 
   --json:
     {"schemaVersion":1,"path":"…","branch":"…","base":{"ref":"…","sha":"…"},
-     "repo":{"root":"…","name":"…"},"created":"branch+worktree","cd":true}
+     "repo":{"root":"…","name":"…"},"created":"branch+worktree",
+     "ignoredFiles":{"copied":0,"kept":0,"skipped":0,"failed":0,"error":null,
+                     "enabled":true},
+     "cd":true}
+
+  The copy did everything it set out to do when ignoredFiles.enabled is true,
+  ignoredFiles.error is null and ignoredFiles.failed is 0. enabled is there
+  because the counters of a copy that never ran are the counters of a repository
+  with nothing to copy. The copy never affects the exit code, and in --json this
+  payload is the only place its trouble is reported.
 
   On error in --json mode, stdout is empty and stderr gets:
     {"schemaVersion":1,"error":{"code":"E_NOT_REPO","message":"…"},"exitCode":2}
@@ -152,6 +209,8 @@ try {
       random: { type: 'boolean' },
       'no-random': { type: 'boolean' },
       'no-submodules': { type: 'boolean' },
+      'copy-ignored-files': { type: 'boolean' },
+      'no-copy-ignored-files': { type: 'boolean' },
       force: { type: 'boolean', short: 'f' },
       'no-cd': { type: 'boolean', short: 'n' },
       json: { type: 'boolean' },
@@ -416,6 +475,9 @@ if (positionals.length > 1) {
 }
 
 const doSubmodules = !values['no-submodules'];
+// On by default: a worktree without its .env cannot run the project, and having
+// to remember a flag for that is the whole complaint this answers.
+const copyIgnored = !values['no-copy-ignored-files'];
 const force = !!values.force;
 const stayOut = !!values['no-cd'];
 
@@ -428,6 +490,10 @@ const randomFirst = !randomOff;
 
 if (values.random && values['no-random']) {
   die('E_VALIDATION', '--random and --no-random cannot both be given');
+}
+
+if (values['copy-ignored-files'] && values['no-copy-ignored-files']) {
+  die('E_VALIDATION', '--copy-ignored-files and --no-copy-ignored-files cannot both be given');
 }
 
 // ── interactivity ────────────────────────────────────────────────────────────
@@ -554,8 +620,17 @@ async function askLine(question, initial = '') {
 
 // ── git helpers ──────────────────────────────────────────────────────────────
 
+// spawnSync's default maxBuffer is 1 MiB, and `ls-files --others --ignored` in a
+// repository that has had `npm install` run in it goes straight past that: the
+// child is killed with SIGTERM, stdout arrives truncated and status is null.
+// That used to read as "could not list the ignored files" and copy nothing at
+// all — .env included, and silently in --json. The listing is bounded by the
+// number of paths in the repository, so give it room.
+const GIT_MAX_BUFFER = 512 * 1024 * 1024;
+
 const git = (dir, args, opts = {}) =>
-  spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', ...opts });
+  spawnSync('git', ['-C', dir, ...args],
+    { encoding: 'utf8', maxBuffer: GIT_MAX_BUFFER, ...opts });
 
 const gitOut = (dir, args) => {
   const r = git(dir, args);
@@ -571,6 +646,295 @@ const hasLocalBranch = (dir, br) =>
 function samePath(a, b) {
   if (a === b) return true;
   try { return realpathSync(a) === realpathSync(b); } catch { return false; }
+}
+
+// ── ignored files ────────────────────────────────────────────────────────────
+
+// The shape --json reports when the copy did not run at all. `enabled: false`
+// exists because {copied:0,kept:0,skipped:0,failed:0,error:null} was identical
+// to a successful copy of a repository with no ignored files, and an agent
+// following "error is null and failed is 0" would then believe the .env is there.
+const noCopy = () => ({
+  copied: 0, kept: 0, skipped: 0, failed: 0, error: null, enabled: false,
+});
+
+function pathExists(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isWithin(root, candidate) {
+  const rootPath = resolvePath(root);
+  const candidatePath = resolvePath(candidate);
+  return candidatePath === rootPath || candidatePath.startsWith(`${rootPath}${sep}`);
+}
+
+// Lexical containment does not protect a write through a symlinked parent.
+// Check every existing component before mkdir/copy; the destination root is
+// realpathed by seedIgnoredFiles so the root itself cannot redirect the write.
+//
+// Returns why the path is unusable, or '' when it is fine. It reports the
+// reason rather than a boolean because "crosses a symlink" was being printed
+// for an ENOTDIR — a destination blocked by an ordinary file, where nothing is
+// a symlink at all.
+//
+// `verified` memoises directories this run has already walked past. Only real
+// directories go in, and only the pre-mkdir call passes it: the post-mkdir call
+// has to lstat the component mkdir just made, which is the whole point of
+// looking twice.
+function destinationBlockedBy(root, candidate, verified) {
+  const rootPath = resolvePath(root);
+  let current = resolvePath(candidate);
+  if (!isWithin(rootPath, current)) return 'escapes the worktree';
+  const walked = [];
+  while (current !== rootPath) {
+    if (verified?.has(current)) break;
+    try {
+      const st = lstatSync(current);
+      if (st.isSymbolicLink()) return 'crosses a symlink in the worktree';
+      if (st.isDirectory()) walked.push(current);
+    } catch (err) {
+      if (err.code !== 'ENOENT') return `blocked by ${err.code} in the worktree`;
+    }
+    const parent = dirname(current);
+    if (parent === current) return 'escapes the worktree';
+    current = parent;
+  }
+  if (verified) for (const d of walked) verified.add(d);
+  return '';
+}
+
+// Every working tree of this repository, resolved both ways: git reports
+// resolved paths, we assemble unresolved ones.
+function ownWorktrees(dir) {
+  const paths = new Set();
+  for (const line of gitOut(dir, ['worktree', 'list', '--porcelain']).split('\n')) {
+    if (!line.startsWith('worktree ')) continue;
+    const p = line.slice('worktree '.length);
+    paths.add(resolvePath(p));
+    try { paths.add(realpathSync(p)); } catch { /* pruned since */ }
+  }
+  return paths;
+}
+
+// Ignored paths a package manager or a build tool puts back on its own. git
+// cannot tell these from an .env: `--directory` only says a directory is
+// ignored as a whole, which is just as true of `.secrets/`, and a size budget
+// would change the answer with the state of the disk. The only honest
+// discriminator is the name, so the list is fixed, sorted, reproduced in
+// --help, and every run says how much it skipped and where.
+const REGENERABLE_DIRS = [
+  '.angular', '.astro', '.cache', '.dart_tool', '.direnv', '.docusaurus',
+  '.eggs', '.gradle', '.mypy_cache', '.next', '.nuxt', '.nyc_output',
+  '.output', '.parcel-cache', '.pnpm-store', '.pytest_cache', '.ruff_cache',
+  '.sass-cache', '.serverless', '.stack-work', '.svelte-kit', '.terraform',
+  '.terragrunt-cache', '.tox', '.turbo', '.venv', '.virtualenvs', '.vite',
+  '.yarn', 'Carthage', 'Pods', '__pycache__', '_build', 'bower_components',
+  'build', 'coverage', 'deps', 'dist', 'jspm_packages', 'node_modules',
+  'out', 'site-packages', 'target', 'tmp', 'vendor', 'venv',
+];
+const REGENERABLE = new Set(REGENERABLE_DIRS);
+
+// The name of the regenerable directory this entry lives in, or ''. Only parent
+// components count: a file called `dist` is a file, not a build directory.
+function regenerableDir(entry) {
+  const parts = entry.split('/');
+  parts.pop();
+  for (const part of parts) if (REGENERABLE.has(part)) return part;
+  return '';
+}
+
+// A new worktree gets everything git tracks and nothing it does not, so it
+// starts without the .env and the credentials the project needs to run. Those
+// live in the main working tree; copy over the ones the destination lacks.
+//
+// Three rules make this safe to have on by default:
+//   - never overwrite and never delete, so an .env edited in a worktree is the
+//     user's and re-running is a no-op;
+//   - never leave the destination, checked lexically and against symlinked
+//     parents, because the list comes from the filesystem;
+//   - never fail the command. A worktree missing its .env is worse than one
+//     with it, but a worktree that was never created is worse than both, so
+//     every failure here is a warning (cf. the naming layer, I22).
+function seedIgnoredFiles(sourceDirIn, destinationDir) {
+  // Resolve the source too. `destinationRoot` is realpathed below and git prints
+  // resolved paths in `worktree list`, so a source that arrives unresolved makes
+  // every path comparison in here compare two spellings of the same place and
+  // answer "no" — which turns **both** worktree guards off at once and lets the
+  // worktree being created be copied into itself. Here the source comes from
+  // `git worktree list` and is already resolved, so the call is insurance; it
+  // keeps this function identical to gwqpull's, where a symlinked ghq.root did
+  // exactly that. The resolved form stays inside this function: comparisons
+  // need it, output does not.
+  let sourceDir = sourceDirIn;
+  try {
+    sourceDir = realpathSync(sourceDirIn);
+  } catch {
+    // Keep what we were given: a source we cannot resolve is a source we
+    // cannot copy from either, and the listing below will say so.
+  }
+  // `error` carries a listing failure into --json, where warn() is silent and
+  // {copied:0,kept:0,skipped:0} is otherwise indistinguishable from a
+  // repository that simply has no ignored files.
+  const result = {
+    copied: 0, kept: 0, skipped: 0, failed: 0, error: null, enabled: true,
+  };
+  if (samePath(sourceDir, destinationDir)) return result;
+
+  let destinationRoot;
+  try {
+    destinationRoot = realpathSync(destinationDir);
+  } catch (err) {
+    result.error = `could not resolve ${destinationDir}: ${err.message}`;
+    warn(result.error);
+    return result;
+  }
+
+  const r = git(sourceDir, [
+    'ls-files', '--others', '--ignored', '--exclude-standard', '-z',
+  ]);
+  if (r.status !== 0 || r.error) {
+    // Say why. The reason used to be dropped, which made an ENOBUFS truncation
+    // look like a repository with nothing to copy.
+    const why = r.error?.code
+      ?? (r.signal ? `killed by ${r.signal}` : `git exited ${r.status}`);
+    result.error = `could not list the ignored files in ${sourceDirIn} (${why})`;
+    warn(result.error);
+    return result;
+  }
+
+  const entries = (r.stdout ?? '').split('\0').filter(Boolean);
+  if (!entries.length) return result;
+
+  // Prune before touching the filesystem: git lists every single file inside
+  // node_modules, and there can be hundreds of thousands of them.
+  //
+  // Our own worktrees go too. A gwq basedir inside the repository makes every
+  // worktree an ignored directory of it, and git reports such a directory as
+  // one indivisible entry — so worktrees start duplicating each other, one
+  // level deeper on every run, with only cpSync's "subdirectory of self" check
+  // stopping the recursion. That is a structural fact from `git worktree list`,
+  // not another name to guess at (I25b).
+  const worktrees = ownWorktrees(sourceDir);
+  // `git worktree list` knows only the live ones. Everything else beside them
+  // in gwq's basedir is a full checkout of this repository that git reports as
+  // an ordinary ignored directory: a `<path>.bak-<timestamp>` this tool moved
+  // aside itself (I4), or a worktree whose `.git` file went missing — and our
+  // own `git worktree prune` runs before this, so that entry is already gone.
+  // The directory the destination sits in is therefore pruned wholesale — one
+  // level, not gwq's whole basedir. gwq does report that (`gwq config get
+  // worktree.basedir`, G5), but the value comes back unexpanded, it is the
+  // configured basedir rather than where this worktree actually went, and it
+  // costs another gwq start-up per run — and it would not change the case
+  // below, because those leftovers sit beside the destination. With a
+  // naming template that nests (host/owner/repo/branch) a leftover further up
+  // is still copied; that needs a layout change to happen at all, and taking
+  // the topmost ancestor instead would prune a real config directory whenever
+  // someone points the basedir inside one. The samePath guard is for a basedir
+  // at the repository root, where pruning the holder would prune everything.
+  const holder = dirname(destinationRoot);
+  const holdsWorktrees = isWithin(sourceDir, holder) && !samePath(holder, sourceDir);
+  const isOwnWorktree = (p) => {
+    if (holdsWorktrees && isWithin(holder, p)) return true;
+    // The arguments look backwards and are not: `worktrees` contains the main
+    // working tree, so asking isWithin(w, p) would put every entry inside it and
+    // prune the lot. git collapses a healthy worktree into exactly one entry, so
+    // p === w is the case that matters here.
+    for (const w of worktrees) if (isWithin(p, w)) return true;
+    return false;
+  };
+  const pruned = new Map();
+  const wanted = [];
+  for (const entry of entries) {
+    const dir = regenerableDir(entry);
+    const label = dir || (isOwnWorktree(resolvePath(sourceDir, entry)) ? 'worktrees of this repository' : '');
+    if (label) pruned.set(label, (pruned.get(label) ?? 0) + 1);
+    else wanted.push(entry);
+  }
+  result.skipped = entries.length - wanted.length;
+
+  // Printed as we were handed it, so this agrees with `repo.root` in --json.
+  if (wanted.length) log(`${dim('│')} copying ignored files from ${dim(sourceDirIn)}`);
+
+  // node_modules and build output are in scope by design, so this can be tens
+  // of thousands of files. A silent multi-minute pause reads as a hang, so keep
+  // a counter moving whenever there is a terminal to move it on.
+  const showProgress = stderrTTY && !isJson;
+  let lastTick = 0;
+  let processed = 0;
+  // The sample is capped; the count is not. Reporting `skipped.length` as the
+  // number of failures under-reported everything past the hundredth.
+  const samples = [];
+  const skip = (reason) => {
+    result.failed++;
+    if (samples.length < 3) samples.push(reason);
+  };
+  const verified = new Set();
+
+  for (const entry of wanted) {
+    // Tick first: kept and skipped entries do work too, and a re-run that keeps
+    // everything is exactly the silent wait the counter exists for.
+    processed++;
+    if (showProgress && Date.now() - lastTick > 200) {
+      lastTick = Date.now();
+      stderr.write(`\r\x1b[K${dim('│')} ${processed} / ${wanted.length}`);
+    }
+    const sourcePath = resolvePath(sourceDir, entry);
+    const destinationPath = resolvePath(destinationRoot, entry);
+    if (!isWithin(sourceDir, sourcePath) || !isWithin(destinationRoot, destinationPath)) {
+      skip(`${entry} (escapes the worktree)`);
+      continue;
+    }
+    if (!pathExists(sourcePath)) continue;
+    if (pathExists(destinationPath)) {
+      result.kept++;
+      continue;
+    }
+    const blocked = destinationBlockedBy(destinationRoot, destinationPath, verified);
+    if (blocked) {
+      skip(`${entry} (${blocked})`);
+      continue;
+    }
+    try {
+      mkdirSync(dirname(destinationPath), { recursive: true });
+      // Look again: mkdir may have followed a link that appeared meanwhile, so
+      // this call deliberately does not use the memo.
+      const raced = destinationBlockedBy(destinationRoot, destinationPath);
+      if (raced) {
+        skip(`${entry} (${raced})`);
+        continue;
+      }
+      // verbatimSymlinks: a relative link is a link within the tree being
+      // copied. Resolving it, which is cpSync's default, rewrites
+      // `.secrets/bin/key -> ../real/key` into an absolute path back into
+      // the main working tree. (Not a node_modules example: I25b never
+      // copies those.)
+      cpSync(sourcePath, destinationPath,
+        { recursive: true, force: false, verbatimSymlinks: true });
+      result.copied++;
+    } catch (err) {
+      skip(`${entry} (${err.message})`);
+    }
+  }
+  if (showProgress) stderr.write('\r\x1b[K');
+
+  // Name what was left behind: an exclusion nobody can see is a silent
+  // surprise the first time a project keeps something real in `dist/`.
+  const names = [...pruned.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
+  log(`${dim('│')} copied ${result.copied} ignored file(s)` +
+    (result.kept ? `, kept ${result.kept} the worktree already had` : '') +
+    (result.skipped
+      ? `, skipped ${result.skipped} entr${result.skipped === 1 ? 'y' : 'ies'} in ` +
+        names.slice(0, 3).join(', ') + (names.length > 3 ? ', …' : '')
+      : ''));
+  if (result.failed) {
+    warn(`could not copy ${result.failed} ignored file(s), starting with ${samples[0]}`);
+  }
+  return result;
 }
 
 // The worktree path for a branch, or '' — read from git rather than
@@ -1301,8 +1665,15 @@ async function main() {
   const existing = worktreePath(cwd, branch);
   if (existing && existsSync(existing)) {
     log(`${dim('│')} ${dim('worktree already exists')}`);
+    // Still seed it: the worktree may predate this feature, or the main working
+    // tree may have gained an .env since. Missing-only, so this cannot clobber.
+    const ignoredFiles = copyIgnored
+      ? seedIgnoredFiles(repo.root, existing)
+      : noCopy();
     log(`${dim('└')} ${green('✓')} ${cyan(branch)} ${dim('→')} ${existing}`);
-    return finish({ repo, branch, base, path: existing, created: 'none', named });
+    return finish({
+      repo, branch, base, path: existing, created: 'none', named, ignoredFiles,
+    });
   }
 
   // Two ways in. Without --from, `gwq add -b` creates branch and worktree in
@@ -1385,6 +1756,13 @@ async function main() {
     die('E_WORKTREE', `gwq reported success but no worktree for ${branch} could be found`);
   }
 
+  // The source is the main working tree, never the worktree we are standing in:
+  // ignored files belong to the repository, not to whichever branch you had
+  // checked out when you ran this.
+  const ignoredFiles = copyIgnored
+    ? seedIgnoredFiles(repo.root, created)
+    : noCopy();
+
   if (doSubmodules && existsSync(`${created}/.gitmodules`)) {
     log(`${dim('│')} initialising submodules`);
     const r = git(created, ['submodule', 'update', '--init', '--recursive'], { stdio: childStdio });
@@ -1393,14 +1771,14 @@ async function main() {
 
   log(`${dim('└')} ${green('✓')} ${cyan(branch)} ${dim('→')} ${created}`);
   return finish({
-    repo, branch, base, path: created, named,
+    repo, branch, base, path: created, named, ignoredFiles,
     created: branchExisted ? 'worktree' : 'branch+worktree',
   });
 }
 
 // ── output ───────────────────────────────────────────────────────────────────
 
-async function finish({ repo, branch, base, path, created, named }) {
+async function finish({ repo, branch, base, path, created, named, ignoredFiles }) {
   if (isJson) {
     process.stdout.write(JSON.stringify({
       schemaVersion: SCHEMA_VERSION,
@@ -1409,6 +1787,10 @@ async function finish({ repo, branch, base, path, created, named }) {
       base: { ref: base.ref, sha: base.sha },
       repo: { root: repo.root, name: repo.name },
       created,
+      // What the ignored-file copy did, so a caller can tell a worktree that
+      // got its .env from one that did not. Adding a field does not bump
+      // schemaVersion (I10).
+      ignoredFiles: ignoredFiles ?? noCopy(),
       // How the name was chosen, so a caller can tell a name it picked from one
       // the tool invented. Adding a field does not bump schemaVersion (I10).
       named,
