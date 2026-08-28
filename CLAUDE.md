@@ -425,6 +425,12 @@ the operation slow enough to need narration: there is a counter on a TTY, and
 `copied N ignored file(s)` afterwards. A silent multi-minute pause reads as a
 hang for the same reason I16's eight seconds did.
 
+The sharp edge of that scope is the "worktree already exists" path: filling in
+only what is missing in a worktree that has its own `node_modules` interleaves
+two installs. Documented in the README rather than special-cased, because a
+denylist of "regenerable" directory names is exactly the guessing this decision
+rejected.
+
 `gwqpull` carries the same behaviour, sharing the implementation by copy rather
 than by dependency (I12).
 

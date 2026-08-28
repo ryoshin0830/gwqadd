@@ -212,6 +212,11 @@ Nothing is overwritten and nothing is deleted, so an `.env` you edited inside a
 worktree stays yours and re-running is a no-op. A copy that fails is a warning,
 never a failed run: the worktree is created either way.
 
+One consequence worth knowing: re-running on a worktree that already has its own
+`node_modules` fills in only what is missing, which mixes two installs. That is
+harmless for `.env` and awkward for a dependency tree, so reinstall there if
+anything looks strange — or pass `--no-copy-ignored-files` for that run.
+
 `--no-copy-ignored-files` turns it off. `--copy-ignored-files` is the default
 and is accepted so a script can say so out loud.
 
