@@ -203,7 +203,9 @@ $ gwqadd feat/login
 ```
 
 The source is the **main working tree**, not the worktree you happen to be
-standing in: ignored files belong to the repository, not to a branch.
+standing in: ignored files belong to the repository, not to a branch. "Ignored"
+means whatever `git ls-files --others --ignored --exclude-standard` reports, so
+`.git/info/exclude` and your machine's global `core.excludesFile` count too.
 
 Dependency and build directories are **not** copied. They are reproducible from
 what git does track, and copying one is slow and frequently wrong — a `.next`
@@ -228,14 +230,19 @@ The worktrees of this repository are skipped as well — that one is not a
 guess but a reading of `git worktree list`, and it matters when gwq's basedir
 lives inside the repository, where worktrees would otherwise copy each other.
 
-Relative symlinks stay relative, so a copied `node_modules/.bin/tsc` does not
-end up pointing back into the main working tree.
+Everything else sitting in the directory gwq puts worktrees in is skipped too — a
+`.bak-` this tool moved aside with `-f`, or a worktree whose `.git` file went
+missing — because each of those is another full checkout of the repository.
+
+Relative symlinks stay relative, so a copied `.secrets/bin/key -> ../real/key`
+does not end up pointing back into the main working tree.
 
 Nothing is overwritten and nothing is deleted, so an `.env` you edited inside a
 worktree stays yours and re-running is a no-op. A copy that fails is a warning,
 never a failed run: the worktree is created either way. In `--json` that trouble
 is reported in the payload instead — the copy did its job when
-`ignoredFiles.error` is null and `ignoredFiles.failed` is 0.
+`ignoredFiles.enabled` is true, `ignoredFiles.error` is null and
+`ignoredFiles.failed` is 0.
 
 `--no-copy-ignored-files` turns it off. `--copy-ignored-files` is the default
 and is accepted so a script can say so out loud.

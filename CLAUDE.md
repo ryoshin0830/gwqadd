@@ -415,18 +415,29 @@ Five properties, all required, all tested:
   worktree without its `.env` is worse than one with it; a worktree that was
   never created is worse than both. This is also why a copy failure does not
   trigger the I3 rollback: by then the worktree exists and is fine.
-- **It reports its own trouble.** `ignoredFiles` carries `failed` and `error`
-  precisely because the run still exits 0. `warn()` is silent in `--json`
-  (I1/I10), so without those fields a caller cannot tell "this repository has no
-  ignored files" from "the copy did nothing at all". The rule to document, and
-  the one SKILL.md gives agents, is: the copy did its job iff `error` is null
-  and `failed` is 0.
+- **It reports its own trouble.** `ignoredFiles` carries `failed`, `error` and
+  `enabled` precisely because the run still exits 0. `warn()` is silent in
+  `--json` (I1/I10), so without those fields a caller cannot tell "this
+  repository has no ignored files" from "the copy did nothing at all". The rule
+  to document, and the one SKILL.md gives agents, is: the copy did its job iff
+  `enabled` is true, `error` is null and `failed` is 0.
+
+  `enabled` was added in review, for the case the first two fields cannot
+  express: `--no-copy-ignored-files` produced
+  `{copied:0,kept:0,skipped:0,failed:0,error:null}`, byte-identical to a
+  successful copy in a repository with nothing to copy. An agent following the
+  rule would then believe the `.env` is there. "Turned off" is not a failure, so
+  it gets its own field rather than an `error` string.
 
 `cpSync` runs with `verbatimSymlinks: true`. Its default resolves a symlink
-before copying, which turns `node_modules/.bin/tsc -> ../typescript/bin/tsc`
-into an absolute path back into the main working tree — a worktree quietly wired
-to another checkout. A relative link inside a tree being copied is part of that
-tree; keep it as it is.
+before copying, which turns `.secrets/bin/key -> ../real/key` into an absolute
+path back into the main working tree — a worktree quietly wired to another
+checkout. A relative link inside a tree being copied is part of that tree; keep
+it as it is.
+
+The example used to be `node_modules/.bin/tsc`, which review pointed out is
+unreachable: I25b never copies `node_modules`. The flag still matters for the
+ignored directories that *are* copied — `.secrets`, `.direnv`-style config.
 
 The copy also runs on the "worktree already exists" path, so a worktree made
 before this feature picks its files up on the next `gwqadd`.
@@ -454,6 +465,29 @@ stopping the recursion was cpSync's own "cannot copy to a subdirectory of self".
 `ownWorktrees()` reads `git worktree list --porcelain`, so this is a structural
 fact rather than another name on the list.
 
+**The worktree list alone was not enough**, and the hole was found in review.
+git knows only the *live* worktrees; what sits beside them in the basedir is an
+ordinary ignored directory and a full checkout of the repository:
+
+- a `<path>.bak-<timestamp>` this tool moved aside itself under `-f` (I4);
+- a worktree whose `.git` file went missing — and `main()` runs
+  `git worktree prune` before the copy, so that entry is already deregistered by
+  the time `ownWorktrees()` looks.
+
+Measured: with a `.bak-` leftover in place, every later run copied a whole
+checkout — `.env` included — into the new worktree, 14 → 21 → 28 files, and the
+deregistered case brought its own nested copy along (10 files in one run). So
+`dirname(destinationRoot)` — the directory gwq was told to put worktrees in — is
+pruned wholesale. That is as structural as the worktree list. `samePath(holder,
+sourceDir)` guards a basedir at the repository root, where pruning the holder
+would prune everything.
+
+The direction of `isWithin(p, w)` in that loop looks backwards and is not:
+`worktrees` contains the **main working tree**, so `isWithin(w, p)` puts every
+entry inside it and prunes the lot (`copied 0`, `.env` gone — measured while
+reviewing). git collapses a healthy worktree into one entry, so `p === w` is the
+case that matters. Keep the comment; the "obvious fix" here is a regression.
+
 There is no honest signal to use instead, and this was checked:
 
 - `git ls-files --others --ignored --exclude-standard --directory` collapses
@@ -467,6 +501,13 @@ Two things keep it honest and both are tested: the list is reproduced verbatim
 in `--help`, and every run reports `skipped N in <dirs>`. An exclusion nobody
 can see is a silent surprise the first time a project keeps something real in
 `dist/`.
+
+`skipped N` counts **entries**, which is what git listed: one file under
+`node_modules`, but one whole directory where git stops at a repository boundary,
+so a nested worktree counts once whatever it holds. The word in the summary is
+"entries" for that reason — the same number meaning two different things was
+noted in review, and the honesty this reporting is supposed to buy (see above)
+depends on the unit being stable.
 
 The list is sorted, unique, and parsed out of the source by the test — the same
 trick I23 uses for the word lists, and the regression test for a hand-edit that
@@ -636,7 +677,9 @@ Not covered — run by hand:
 | Ignored copy, big tree | a repo with `node_modules` installed | a counter moves, then `copied N ignored file(s)` |
 | Ignored copy, from a worktree | `gwqadd feat/x` inside worktree A | the printed source is the main clone, not A |
 | Ignored copy, huge listing | a repo with `npm install` run in it | `.env` still arrives; `ignoredFiles.error` is null (I25c) |
-| Ignored copy, basedir inside the repo | `worktree.basedir = .worktrees`, gitignored | `skipped N in worktrees of this repository`, no nesting |
+| Ignored copy, basedir inside the repo | `worktree.basedir = .worktrees`, gitignored | `skipped N entries in worktrees of this repository`, no nesting |
+| Ignored copy, leftover beside the worktrees | `-f` a collision, then `gwqadd` again | the `.bak-` is not copied into the new worktree |
+| Ignored copy, global excludes | `core.excludesFile` matching a local file | it is copied — `--exclude-standard` includes it |
 | npx one-shot | `npx gwqadd feat/x` | box on terminal, `c` copies the cd command |
 | Stdout separation | `gwqadd feat/x > out.txt` | box on terminal, `out.txt` empty |
 

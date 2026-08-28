@@ -121,7 +121,7 @@ existing branch, that is a signal you should have used `gwqcd` or `gwqpull`.
   "created":       "branch+worktree",
   "named":         "argument",
   "ignoredFiles":  { "copied": 6, "kept": 0, "skipped": 41932,
-                     "failed": 0, "error": null },
+                     "failed": 0, "error": null, "enabled": true },
   "cd":            false
 }
 ```
@@ -136,9 +136,11 @@ existing branch, that is a signal you should have used `gwqcd` or `gwqpull`.
   kept, and how many were `skipped` for living in a dependency or build
   directory (`node_modules`, `.venv`, `dist`, … — `gwqadd --help` lists all 46).
   This happens by default; pass `--no-copy-ignored-files` to skip it. Nothing is
-  ever overwritten. **The copy did its job iff `error` is null and `failed` is
-  0** — it never affects `exitCode`, and in `--json` this is the only place its
-  trouble is reported, so check it rather than the exit code or stderr.
+  ever overwritten. **The copy did its job iff `enabled` is true, `error` is null
+  and `failed` is 0** — `enabled: false` means it never ran, whose counters are
+  otherwise identical to a repository with nothing to copy. It never affects
+  `exitCode`, and in `--json` this payload is the only place its trouble is
+  reported, so check it rather than the exit code or stderr.
   **The new worktree has no `node_modules`** — run the project's install step
   there before building or testing.
 

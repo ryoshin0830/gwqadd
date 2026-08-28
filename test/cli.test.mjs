@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 import {
   mkdtempSync, writeFileSync, chmodSync, rmSync, mkdirSync,
   existsSync, readdirSync, realpathSync, readFileSync, copyFileSync,
-  symlinkSync, readlinkSync,
+  symlinkSync, readlinkSync, renameSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -59,7 +59,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 slug=$(printf '%s' "$branch" | tr '/' '-')
-wt="${wtBase}/$slug"
+wt="\${GWQADD_TEST_WTBASE:-${wtBase}}/$slug"
 if [ "$newbranch" = "1" ]; then
   # Mirrors git: the branch is created while preparing, so a destination
   # failure leaves the branch behind.
@@ -106,8 +106,10 @@ beforeEach(() => {
   git(repo, 'symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
 });
 
-function run(args, { cwd = repo } = {}) {
-  const env = { ...process.env, PATH: `${shimDir}:${process.env.PATH}`, NO_COLOR: '1' };
+function run(args, { cwd = repo, env: extra = {} } = {}) {
+  const env = {
+    ...process.env, PATH: `${shimDir}:${process.env.PATH}`, NO_COLOR: '1', ...extra,
+  };
   // We force NO_COLOR; node warns to stderr when FORCE_COLOR is also set, so a
   // developer who exports it would otherwise see phantom failures.
   delete env.FORCE_COLOR;
@@ -959,7 +961,7 @@ test('dependency and build directories are skipped, config files are not', () =>
   for (const p of ['node_modules', '.venv', 'dist', 'website/.next']) {
     assert.ok(!existsSync(join(j.path, p)), `${p} must not be copied`);
   }
-  assert.deepEqual(j.ignoredFiles, { copied: 2, kept: 0, skipped: 4, failed: 0, error: null });
+  assert.deepEqual(j.ignoredFiles, { copied: 2, kept: 0, skipped: 4, failed: 0, error: null, enabled: true });
 });
 
 test('the skipped directories are named on stderr', () => {
@@ -1014,10 +1016,10 @@ test('a file the worktree already has is kept, not overwritten', () => {
 test('--json reports what the copy did', () => {
   seedIgnored(repo);
   const first = out(run(['--json', '-n', 'feat/x']));
-  assert.deepEqual(first.ignoredFiles, { copied: 2, kept: 0, skipped: 0, failed: 0, error: null });
+  assert.deepEqual(first.ignoredFiles, { copied: 2, kept: 0, skipped: 0, failed: 0, error: null, enabled: true });
 
   const second = out(run(['--json', '-n', 'feat/x']));
-  assert.deepEqual(second.ignoredFiles, { copied: 0, kept: 2, skipped: 0, failed: 0, error: null });
+  assert.deepEqual(second.ignoredFiles, { copied: 0, kept: 2, skipped: 0, failed: 0, error: null, enabled: true });
 });
 
 // The listing is the central risk of taking node_modules into scope: git prints
@@ -1060,6 +1062,61 @@ test('this repository\'s own worktrees are never copied', () => {
     'a worktree of this repository must not be copied into another worktree');
 });
 
+// `git worktree list` only knows live worktrees. Everything else beside them in
+// gwq's basedir — a .bak- this tool moved aside with -f, a worktree whose .git
+// file went missing and that our own `worktree prune` has just deregistered — is
+// an ignored directory like any other, and a full checkout of the repository.
+function worktreesInsideRepo() {
+  writeFileSync(join(repo, '.gitignore'), '.env\n.worktrees/\n');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-qm', 'ignore rules');
+  writeFileSync(join(repo, '.env'), 'TOKEN=main-working-tree\n');
+  return { env: { GWQADD_TEST_WTBASE: join(repo, '.worktrees') } };
+}
+
+test('a .bak- leftover beside the worktrees is not copied', () => {
+  const inside = worktreesInsideRepo();
+  const first = out(run(['--json', '-n', 'feat/one'], inside));
+  // Exactly what -f does to a collision (I4): moved aside, never deleted.
+  renameSync(first.path, `${first.path}.bak-20260828T120000Z`);
+  git(repo, 'worktree', 'prune');
+
+  const second = out(run(['--json', '-n', 'feat/two'], inside));
+  assert.equal(readFileSync(join(second.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.ok(!existsSync(join(second.path, '.worktrees')),
+    'a leftover checkout must not be copied into the new worktree');
+});
+
+test('a worktree our own prune just deregistered is not copied', () => {
+  const inside = worktreesInsideRepo();
+  const first = out(run(['--json', '-n', 'feat/one'], inside));
+  rmSync(join(first.path, '.git'), { force: true });
+
+  const second = out(run(['--json', '-n', 'feat/two'], inside));
+  assert.equal(readFileSync(join(second.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.ok(!existsSync(join(second.path, '.worktrees')),
+    'main() prunes first, so the entry is gone by the time the copy looks');
+});
+
+test('a healthy worktree beside the destination is still skipped, not copied', () => {
+  const inside = worktreesInsideRepo();
+  out(run(['--json', '-n', 'feat/one'], inside));
+
+  const second = out(run(['--json', '-n', 'feat/two'], inside));
+  assert.equal(readFileSync(join(second.path, '.env'), 'utf8'), 'TOKEN=main-working-tree\n');
+  assert.ok(!existsSync(join(second.path, '.worktrees')));
+});
+
+test('--json distinguishes a copy that was turned off from one with nothing to do', () => {
+  seedIgnored(repo);
+  const off = out(run(['--json', '-n', '--no-copy-ignored-files', 'feat/x']));
+  assert.equal(off.ignoredFiles.enabled, false,
+    'an agent must not read "turned off" as "the .env is there"');
+
+  const on = out(run(['--json', '-n', 'feat/y']));
+  assert.equal(on.ignoredFiles.enabled, true);
+});
+
 test('a relative symlink stays relative instead of pointing at the main tree', () => {
   writeFileSync(join(repo, '.gitignore'), 'ignored-dir/\n');
   git(repo, 'add', '-A');
@@ -1075,7 +1132,8 @@ test('a relative symlink stays relative instead of pointing at the main tree', (
     'cpSync rewrites relative symlinks to absolute paths unless verbatimSymlinks is set');
 });
 
-test('the failure count is the real one, not the first hundred', () => {
+test('the failure count is the real one, not the first hundred', (t) => {
+  if (process.getuid?.() === 0) return t.skip('chmod 000 does not restrain root');
   writeFileSync(join(repo, '.gitignore'), 'locked/\n');
   git(repo, 'add', '-A');
   git(repo, 'commit', '-qm', 'ignore rules');
