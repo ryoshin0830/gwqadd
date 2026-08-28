@@ -477,10 +477,20 @@ ordinary ignored directory and a full checkout of the repository:
 Measured: with a `.bak-` leftover in place, every later run copied a whole
 checkout — `.env` included — into the new worktree, 14 → 21 → 28 files, and the
 deregistered case brought its own nested copy along (10 files in one run). So
-`dirname(destinationRoot)` — the directory gwq was told to put worktrees in — is
-pruned wholesale. That is as structural as the worktree list. `samePath(holder,
-sourceDir)` guards a basedir at the repository root, where pruning the holder
-would prune everything.
+`dirname(destinationRoot)` — **the directory the destination sits in** — is
+pruned wholesale. `samePath(holder, sourceDir)` guards a basedir at the
+repository root, where pruning the holder would prune everything.
+
+That is one level, not gwq's basedir, and the difference matters when the naming
+template nests: with `{{.Host}}/{{.Owner}}/{{.Repository}}/{{.Branch}}` the
+holder is `…/<repo>`, so a leftover higher up — `.worktrees/old-checkout/` — is
+still copied. Review measured it, and left it: reaching that state needs the
+template to have changed under an existing worktree, while the alternative
+(prune the topmost ancestor between the repository and the destination) would
+eat a real config directory the moment someone points the basedir inside one.
+Asking gwq for its basedir would be the honest fix and there is no interface for
+it. Wording first, because "the directory gwq was told to put worktrees in" is
+what this paragraph used to claim, and it is not what the code does.
 
 The direction of `isWithin(p, w)` in that loop looks backwards and is not:
 `worktrees` contains the **main working tree**, so `isWithin(w, p)` puts every
