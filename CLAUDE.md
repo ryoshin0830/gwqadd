@@ -32,7 +32,7 @@ you are in; `gwqpull` fetches a repo from a remote; `gwqcd` only navigates.**
 
 ## Facts about gwq v0.1.1 this design is built on
 
-All four were verified empirically before a line was written. If a gwq upgrade
+All five were verified empirically before a line was written. If a gwq upgrade
 changes any of them, the corresponding code here is wrong, not merely stale.
 
 ### G1. `gwq add -b` branches from the HEAD of its cwd
@@ -63,6 +63,21 @@ the same note.
 
 Also worth knowing: an **empty** destination directory is fine — git accepts it.
 Only a non-empty one collides, so do not treat mere existence as a conflict.
+
+### G5. gwq will tell you its basedir
+
+`gwq config get worktree.basedir` works on v0.1.1 (commit c424773) and prints
+the configured value — `~/worktrees` here, **unexpanded** — exiting 0 even with
+an empty `HOME` and `XDG_CONFIG_HOME`, where it falls back to the default. An
+unknown key exits 1 with a message, so success is distinguishable.
+
+Recorded because I25b once claimed the opposite, as the reason for not widening
+the worktree pruning, and review caught it. Three real reasons to still not use
+it: the `~` needs expanding, the answer is the *configured* basedir rather than
+where this worktree actually went (the naming template sits in between), and it
+is another gwq start-up on every run. "There is no interface" collapses the
+moment someone runs `gwq config get --help`, where this is the first example;
+"there is an interface and here is why we do not use it" does not.
 
 ---
 
@@ -488,9 +503,12 @@ still copied. Review measured it, and left it: reaching that state needs the
 template to have changed under an existing worktree, while the alternative
 (prune the topmost ancestor between the repository and the destination) would
 eat a real config directory the moment someone points the basedir inside one.
-Asking gwq for its basedir would be the honest fix and there is no interface for
-it. Wording first, because "the directory gwq was told to put worktrees in" is
-what this paragraph used to claim, and it is not what the code does.
+Asking gwq for its basedir looked like the honest fix, and this paragraph used
+to say there was no interface for it. There is — see G5 — and using it still
+would not help here: the leftovers this fix is about sit *beside* the
+destination, which one level already covers. Wording first, because "the
+directory gwq was told to put worktrees in" is also what this paragraph used to
+claim, and it is not what the code does.
 
 The direction of `isWithin(p, w)` in that loop looks backwards and is not:
 `worktrees` contains the **main working tree**, so `isWithin(w, p)` puts every
