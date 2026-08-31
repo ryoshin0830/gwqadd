@@ -373,19 +373,42 @@ calls it.
 Adjectives and nouns come from glitchdotcom/friendly-words (MIT (c) 2018 Glitch,
 notice reproduced in `LICENSE`); gerunds from dariusk/corpora (CC0). VADER (MIT)
 filters tone, dwyl/english-words (Unlicense) filters spelling, and EFF's short
-diceware wordlist (CC BY 3.0 US) filters for easy words — all three at build
-time only, none of them shipped, so the licence trail of what *is* shipped is
-still friendly-words and corpora alone. `LICENSE` needs no entry for a filter.
+diceware wordlist filters for easy words — all three at build time only, none of
+them shipped. **No word ships that friendly-words and corpora had not already
+licensed to us; the filters only narrowed which of them we kept**, which is why
+`LICENSE` still carries the friendly-words notice and nothing else.
+
+State that claim carefully, because the obvious shorter version is wrong: 434
+distinct EFF words — a third of that list — are among the 502 adjective+noun
+slots. The *file* does not ship; a third of its contents do, as words
+friendly-words already gave us. And the EFF list differs in kind from the other
+two filters, which is worth knowing before leaning on the precedent: VADER
+removes on an attribute it computes per word, while EFF supplies a **membership
+set**, and the protectable part of a compilation is its selection. Nothing here
+needs a lawyer for an MIT package — the words are MIT and CC0 either way, and CC
+BY's obligations attach to distributing the licensed material, which we do not
+— but do not write "the licence trail is friendly-words alone" as though the EFF
+list played no part. It chose the survivors.
+
+EFF's wordlists carry no file-level licence; the site terms are all there is,
+and they now read CC BY 4.0 International (they read CC BY 3.0 US when this
+2016 file was posted — CC grants are irrevocable, so either reading is fine).
+Cite the site terms, not a version, or this line goes stale again.
 
 **The easy-word filter is what sets the counts, and they are small on purpose:
-149 x 130 x 353 = 6,837,610.** The revision before it took whatever
+149 x 130 x 353 = 6,837,610 combinations, of which the noun guard below leaves
+6,828,770 reachable.** The revision before it took whatever
 friendly-words offered and reached 9,582,408 with `petalite`, `candytuft` and
 `ptarmigan` in it — a namespace nobody wanted more of, spelled in words this
 project's users do not read. EFF built its short list from Ghent University's
 word-familiarity data with rules that are exactly the ask (five characters or
 fewer, no homophones, nothing hard to spell, nothing offensive), which is why
 easiness here is a membership test against a curated list and not a frequency
-cutoff we would have to defend a number for. Rejected on the way: Google's
+cutoff we would have to defend a number for. **That membership test is what the
+adjectives and the nouns pass; no gerund passes it or can** — five characters
+stops at `cook`, and the gerunds run six to nine. What is easy about a gerund is
+its verb, so the test is applied to the infinitive instead, which is the whole
+of the first consequence below. Rejected on the way: Google's
 10k-frequency list, which is derived from an LDC corpus its own `LICENSE.md`
 warns against using commercially, and EFF's *large* list, which readmits
 `albatross` and `ambiguous`.
@@ -406,7 +429,7 @@ Two things scale with the pool shrinking, and both were measured rather than
 guessed:
 
 - `REJECT` grows. At one in 132 gerunds a `mugging` would be offered often
-  enough to matter, where at one in 109 sampled from 623 it was not. Two of the
+  enough to matter, where at one in 109 sampled from 542 it was not. Two of the
   five names added there are gerunds and take that pool from 132 to 130; the
   other three (`frown`, `scowl`, `snarl`) take the nouns from 356 to 353.
 - **`randomName()` refuses to reuse the adjective as the noun.** 68 easy words

@@ -84,7 +84,7 @@ gwqadd --random -n --json --from <base>
 ```
 
 This is the only naming path that works without a terminal. It runs no AI, asks
-nothing, and returns a three-word name such as `plume-melting-bearskin` in the
+nothing, and returns a three-word name such as `tidy-dancing-kite` in the
 usual JSON, with `"named":"random"` so you can tell it apart from a name you
 chose. `--random` together with an explicit branch name is an error.
 

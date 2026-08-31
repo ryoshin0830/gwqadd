@@ -7,7 +7,7 @@
 //
 //   adjectives, nouns  glitchdotcom/friendly-words   MIT (c) 2018 Glitch
 //   gerunds            dariusk/corpora               CC0
-//   easy-word filter   EFF short wordlist #1         CC BY 3.0 US build-time only
+//   easy-word filter   EFF short wordlist #1         eff.org terms, build-time only
 //   tone filter        cjhutto/vaderSentiment        MIT       build-time only
 //   spelling           dwyl/english-words            Unlicense build-time only
 //
@@ -23,14 +23,16 @@ const DICT = 'https://raw.githubusercontent.com/dwyl/english-words/master/words_
 // data: at most 5 characters, no homophones, nothing hard to spell, nothing
 // offensive. That is the definition of "easy word" this tool wants, already
 // curated by someone else, so easiness is a membership test rather than a
-// frequency threshold we would have to pick a cutoff for.
+// frequency threshold we would have to pick a cutoff for. Adjectives and nouns
+// are tested against it directly; gerunds cannot be, and are tested through
+// their infinitive — see the comment above `gerunds` below.
 const EASY = 'https://www.eff.org/files/2016/09/08/eff_short_wordlist_1.txt';
 
 // VADER scores sentiment, not taste, so words that are merely charmless get
 // through it. Growing this list is expected maintenance, not a design failure.
 // A smaller pool also means each survivor is offered more often, which is why
 // 'mugging' and 'punching' were worth naming here at one in 132 gerunds and
-// were not at one in 109 sampled out of 623.
+// were not at one in 109 sampled out of 542.
 const REJECT = new Set([
   'abrasive', 'banning', 'begging', 'concerning', 'frown', 'groaning',
   'harming', 'itching', 'mugging', 'punching', 'scowl', 'screeching', 'snarl',
@@ -61,7 +63,8 @@ const pleasant = (w) =>
 
 const spelled = new Set(lines(dictRaw));
 
-// "11111\tacid" — the roll is the diceware index, the word is the last field.
+// "1111\tacid" — the roll is the diceware index, the word is the last field.
+// Four digits, because the short list is 6^4; the large one is 6^5 and five.
 const easy = new Set(lines(easyRaw).map((l) => l.split(/\s+/).pop().toLowerCase()));
 
 // The spelling check is what kills "claping" (a misspelling that ships in
@@ -90,7 +93,10 @@ const gerunds = keep(
     .filter((v) => easy.has(v.infinitive?.[0]))
     .map((v) => v.gerund?.[0]?.toLowerCase())
     .filter(Boolean),
-  /^[a-z]{3,10}$/,
+  // {5,10}, not {3,10}: the real range is 6-9, and the floor is the only thing
+  // standing between `endsWith('ing')` and a corpora entry whose `gerund[0]` is
+  // wrongly an infinitive — `king`, `ring`, `sing`, `wing` all end in "ing".
+  /^[a-z]{5,10}$/,
 ).filter((w) => w.endsWith('ing'));
 
 // Wrap so the arrays read like the rest of the file rather than one long line.

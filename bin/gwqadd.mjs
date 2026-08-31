@@ -997,12 +997,19 @@ function defaultBranch(dir) {
 // Adjectives and nouns: glitchdotcom/friendly-words, MIT (c) 2018 Glitch.
 // Gerunds: dariusk/corpora, CC0.
 //
-// Every word here also appears in EFF's short diceware wordlist, which EFF
-// built from Ghent University's word-familiarity data: five characters or
-// fewer, no homophones, nothing hard to spell. That is what keeps the names
-// readable to someone who does not read English all day, and it is why the
-// three lists are this small — 149 * 130 * 353 = 6,837,610 names, against the
-// 9,582,408 of the revision that took whatever friendly-words offered.
+// What keeps these readable to someone who does not read English all day is
+// EFF's short diceware wordlist, which EFF built from Ghent University's
+// word-familiarity data: five characters or fewer, no homophones, nothing hard
+// to spell. Every adjective and every noun here is a member of it. **No gerund
+// is, and none can be** — that list stops at five characters and these run six
+// to nine; what is easy about a gerund is its verb, so each was conjugated from
+// an infinitive the list holds (`cook` is there, `cooking` never could be).
+//
+// That is why the three lists are this small — 149 * 130 * 353 = 6,837,610
+// combinations, against the 9,582,408 of the revision that took whatever
+// friendly-words offered. `randomName()` below cannot reach 8,840 of them (the
+// 68 words that are both an adjective and a noun, times the gerunds), so the
+// number of names it actually hands out is 6,828,770.
 
 const ADJECTIVES = [
   'aged', 'ahead', 'ajar', 'alike', 'alive', 'apple', 'atom', 'awake', 'blend',
@@ -1120,7 +1127,7 @@ const RANDOM_TRIES = 10;
 // `claude -w` lets a collision become a hard error; we reroll instead. The
 // check has to happen before the name is shown, so the confirmation prompt can
 // never offer something that cannot be created (I24). Ten failures in a
-// 6,837,610-name space means our randomness is broken, not the user's luck.
+// 6,828,770-name space means our randomness is broken, not the user's luck.
 //
 // The branch check alone is enough, and a `worktreePath()` call beside it would
 // be unreachable: `git worktree list --porcelain` only prints `branch

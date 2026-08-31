@@ -185,7 +185,7 @@ function wordList(name) {
 test('the generated word lists have the shape the generator assumes', () => {
   for (const [name, count, shape] of [
     ['ADJECTIVES', 149, /^[a-z]{3,9}$/],
-    ['GERUNDS', 130, /^[a-z]{3,10}$/],
+    ['GERUNDS', 130, /^[a-z]{5,10}$/],
     ['NOUNS', 353, /^[a-z]{3,9}$/],
   ]) {
     const words = wordList(name);
@@ -841,10 +841,19 @@ test('a taken random name is rerolled, not offered', () => {
 });
 
 test('the noun is never the same word as the adjective', () => {
-  // 68 of the easy words are both, so `storm-twisting-storm` is reachable
-  // often enough to guard against. With 'storm' the only adjective, the guard
-  // leaves exactly one possible name — no luck involved in this assertion.
-  const { root, bin } = cliWithWords(['storm'], ['humming'], ['storm', 'owl']);
+  // 68 of the easy words are both, so `storm-twisting-storm` is reachable often
+  // enough to guard against. 'storm' fills the noun list 1023 times over
+  // against a single 'owl': with the guard every copy goes and the only
+  // reachable name is storm-humming-owl, while without it the roll lands on
+  // 'storm' 1023 times in 1024 — the same margin the reroll test above accepts.
+  //
+  // The weighting is the point, not padding. A two-word noun list would be
+  // blind to a guard that drops only the *first* copy — `NOUNS.splice(...)`,
+  // the obvious simplification, which in its in-place form also shrinks the
+  // module-level array for every later call.
+  const { root, bin } = cliWithWords(
+    ['storm'], ['humming'], [...Array(1023).fill('storm'), 'owl'],
+  );
 
   const r = runCli(bin, ['--random', '--json', '-n']);
   assert.equal(r.status, 0, r.stderr);
@@ -853,6 +862,7 @@ test('the noun is never the same word as the adjective', () => {
 
   spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
   gitTry(repo, 'branch', '-D', 'storm-humming-owl');
+  gitTry(repo, 'branch', '-D', 'storm-humming-storm');
   rmSync(root, { recursive: true, force: true });
 });
 
