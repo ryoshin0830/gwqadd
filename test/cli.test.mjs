@@ -184,9 +184,9 @@ function wordList(name) {
 
 test('the generated word lists have the shape the generator assumes', () => {
   for (const [name, count, shape] of [
-    ['ADJECTIVES', 216, /^[a-z]{3,9}$/],
-    ['GERUNDS', 109, /^[a-z]{5,10}$/],
-    ['NOUNS', 407, /^[a-z]{3,9}$/],
+    ['ADJECTIVES', 149, /^[a-z]{3,9}$/],
+    ['GERUNDS', 130, /^[a-z]{3,10}$/],
+    ['NOUNS', 353, /^[a-z]{3,9}$/],
   ]) {
     const words = wordList(name);
     assert.equal(words.length, count, `${name}: expected ${count} words`);
@@ -837,6 +837,37 @@ test('a taken random name is rerolled, not offered', () => {
   spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
   spawnSync('git', ['-C', repo, 'branch', '-D', 'bb-humming-owl']);
   gitTry(repo, 'branch', '-D', 'aa-humming-owl');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('the noun is never the same word as the adjective', () => {
+  // 68 of the easy words are both, so `storm-twisting-storm` is reachable
+  // often enough to guard against. With 'storm' the only adjective, the guard
+  // leaves exactly one possible name — no luck involved in this assertion.
+  const { root, bin } = cliWithWords(['storm'], ['humming'], ['storm', 'owl']);
+
+  const r = runCli(bin, ['--random', '--json', '-n']);
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.equal(j.branch, 'storm-humming-owl');
+
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  gitTry(repo, 'branch', '-D', 'storm-humming-owl');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('a single noun that is also the adjective still yields a name', () => {
+  // The degenerate case the filter exists to survive: rerolling in a loop here
+  // would never terminate. Repeating the word beats hanging.
+  const { root, bin } = cliWithWords(['storm'], ['humming'], ['storm']);
+
+  const r = runCli(bin, ['--random', '--json', '-n']);
+  assert.equal(r.status, 0, r.stderr);
+  const j = JSON.parse(r.stdout);
+  assert.equal(j.branch, 'storm-humming-storm');
+
+  spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', j.path]);
+  gitTry(repo, 'branch', '-D', 'storm-humming-storm');
   rmSync(root, { recursive: true, force: true });
 });
 

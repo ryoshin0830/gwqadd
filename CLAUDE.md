@@ -372,14 +372,56 @@ calls it.
 
 Adjectives and nouns come from glitchdotcom/friendly-words (MIT (c) 2018 Glitch,
 notice reproduced in `LICENSE`); gerunds from dariusk/corpora (CC0). VADER (MIT)
-filters tone and dwyl/english-words (Unlicense) filters spelling, both at build
-time only — neither is shipped.
+filters tone, dwyl/english-words (Unlicense) filters spelling, and EFF's short
+diceware wordlist (CC BY 3.0 US) filters for easy words — all three at build
+time only, none of them shipped, so the licence trail of what *is* shipped is
+still friendly-words and corpora alone. `LICENSE` needs no entry for a filter.
 
-The counts match `claude -w` (216 x 109 x 407 = 9,582,408). **The words do not.**
-Lifting 732 hand-curated words out of a proprietary binary into an MIT package
-is a licence question with no upside. There is a test asserting the counts, the
-sort order, uniqueness and the character classes; it is the regression test for
-a hand-edit.
+**The easy-word filter is what sets the counts, and they are small on purpose:
+149 x 130 x 353 = 6,837,610.** The revision before it took whatever
+friendly-words offered and reached 9,582,408 with `petalite`, `candytuft` and
+`ptarmigan` in it — a namespace nobody wanted more of, spelled in words this
+project's users do not read. EFF built its short list from Ghent University's
+word-familiarity data with rules that are exactly the ask (five characters or
+fewer, no homophones, nothing hard to spell, nothing offensive), which is why
+easiness here is a membership test against a curated list and not a frequency
+cutoff we would have to defend a number for. Rejected on the way: Google's
+10k-frequency list, which is derived from an LDC corpus its own `LICENSE.md`
+warns against using commercially, and EFF's *large* list, which readmits
+`albatross` and `ambiguous`.
+
+Two consequences worth knowing before touching the generator:
+
+- **Gerunds cannot be filtered the way the other two are.** A list of short
+  familiar words holds `cook` and never `cooking`, so the -ing forms are
+  conjugated from the corpora verbs whose *infinitive* is easy. That is also
+  what makes them verbs: friendly-words' own -ing predicates are adjectives in
+  disguise (`amazing`, `charming`) as often as not, and are no longer used.
+- **There is no stride sampling any more.** It existed only to hit `claude -w`'s
+  216 / 109 / 407 exactly; with the filter deciding which words are allowed at
+  all, that target has nothing behind it, and cutting an already small pool by
+  two thirds would only cost names. The pools ship whole.
+
+Two things scale with the pool shrinking, and both were measured rather than
+guessed:
+
+- `REJECT` grows. At one in 132 gerunds a `mugging` would be offered often
+  enough to matter, where at one in 109 sampled from 623 it was not. Two of the
+  five names added there are gerunds and take that pool from 132 to 130; the
+  other three (`frown`, `scowl`, `snarl`) take the nouns from 356 to 353.
+- **`randomName()` refuses to reuse the adjective as the noun.** 68 easy words
+  are both (`cold`, `chip`, `storm`) against 9 before, so `storm-twisting-storm`
+  went from one roll in 9,768 to one in 773. It filters the noun list rather
+  than rerolling in a `while`: with a one-word noun list that equals the
+  adjective — which the shipped lists cannot produce but `cliWithWords()` in the
+  tests can — a reroll loop never terminates. The fallback repeats the word, and
+  there is a test for each half. Dropping the overlap from either list instead
+  was rejected: it costs `green`, `cold` and `chill`, three of the best words in
+  both.
+
+There is a test asserting the counts, the sort order, uniqueness and the
+character classes; it is the regression test for a hand-edit. A regeneration
+that moves a count is expected to move that test with it.
 
 ### I24. A random name is checked before it is offered, never after
 
