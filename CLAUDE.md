@@ -308,6 +308,14 @@ repository's convention, and the shape is the point: three hyphenated words with
 no slash is not a shape a person types, so `git branch` output separates real
 branches from scratch worktrees at a glance.
 
+The easy-word filter (I23) took some of the force out of that last clause and it
+is worth saying so: `petalite-scorching-ptarmigan` announced itself, while
+`tidy-dancing-kite` is three words a person could plausibly have typed. **The
+no-slash rule is now doing most of the separating**, and it is enough — every
+convention this tool has ever seen in a real repository prefixes with one. Do
+not add a marker to win the rest back; a random name that has to be tagged as
+random is worse than one you read twice.
+
 ### I19. One confirmation, and "no" goes back to the description
 
 `confirmCreate()` is the only checkpoint. `n` returns to the description prompt
@@ -372,14 +380,86 @@ calls it.
 
 Adjectives and nouns come from glitchdotcom/friendly-words (MIT (c) 2018 Glitch,
 notice reproduced in `LICENSE`); gerunds from dariusk/corpora (CC0). VADER (MIT)
-filters tone and dwyl/english-words (Unlicense) filters spelling, both at build
-time only — neither is shipped.
+filters tone, dwyl/english-words (Unlicense) filters spelling, and EFF's short
+diceware wordlist filters for easy words — all three at build time only, none of
+them shipped. **No word ships that friendly-words and corpora had not already
+licensed to us; the filters only narrowed which of them we kept**, which is why
+`LICENSE` still carries the friendly-words notice and nothing else.
 
-The counts match `claude -w` (216 x 109 x 407 = 9,582,408). **The words do not.**
-Lifting 732 hand-curated words out of a proprietary binary into an MIT package
-is a licence question with no upside. There is a test asserting the counts, the
-sort order, uniqueness and the character classes; it is the regression test for
-a hand-edit.
+State that claim carefully, because the obvious shorter version is wrong: 434
+distinct EFF words — a third of that list — are among the 502 adjective+noun
+slots. The *file* does not ship; a third of its contents do, as words
+friendly-words already gave us. And the EFF list differs in kind from the other
+two filters, which is worth knowing before leaning on the precedent: VADER
+removes on an attribute it computes per word, while EFF supplies a **membership
+set**, and the protectable part of a compilation is its selection. Nothing here
+needs a lawyer for an MIT package — the words are MIT and CC0 either way, and CC
+BY's obligations attach to distributing the licensed material, which we do not
+— but do not write "the licence trail is friendly-words alone" as though the EFF
+list played no part. It chose the survivors.
+
+EFF's wordlists carry no file-level licence; the site terms are all there is,
+and they now read CC BY 4.0 International (they read CC BY 3.0 US when this
+2016 file was posted — CC grants are irrevocable, so either reading is fine).
+Cite the site terms, not a version, or this line goes stale again.
+
+**The easy-word filter is what sets the counts, and they are small on purpose:
+149 x 130 x 353 = 6,837,610 combinations, of which the noun guard below leaves
+6,828,770 reachable.** The revision before it took whatever
+friendly-words offered and reached 9,582,408 with `petalite`, `candytuft` and
+`ptarmigan` in it — a namespace nobody wanted more of, spelled in words this
+project's users do not read. EFF built its short list from Ghent University's
+word-familiarity data with rules that are exactly the ask (five characters or
+fewer, no homophones, nothing hard to spell, nothing offensive), which is why
+easiness here is a membership test against a curated list and not a frequency
+cutoff we would have to defend a number for. **That membership test is what the
+adjectives and the nouns pass; no gerund passes it or can** — five characters
+stops at `cook`, and the gerunds run six to nine. What is easy about a gerund is
+its verb, so the test is applied to the infinitive instead, which is the whole
+of the first consequence below. Rejected on the way: Google's
+10k-frequency list, which is derived from an LDC corpus its own `LICENSE.md`
+warns against using commercially, and EFF's *large* list, which readmits
+`albatross` and `ambiguous`.
+
+Two consequences worth knowing before touching the generator:
+
+- **Gerunds cannot be filtered the way the other two are.** A list of short
+  familiar words holds `cook` and never `cooking`, so the -ing forms are
+  conjugated from the corpora verbs whose *infinitive* is easy. That is also
+  what makes them verbs: friendly-words' own -ing predicates are adjectives in
+  disguise (`amazing`, `charming`) as often as not, and are no longer used.
+- **There is no stride sampling any more.** It existed only to hit `claude -w`'s
+  216 / 109 / 407 exactly; with the filter deciding which words are allowed at
+  all, that target has nothing behind it, and cutting an already small pool by
+  two thirds would only cost names. The pools ship whole.
+
+Two things scale with the pool shrinking, and both were measured rather than
+guessed:
+
+- `REJECT` grows. At one in 132 gerunds a `mugging` would be offered often
+  enough to matter, where at one in 109 sampled from 542 it was not. Two of the
+  five names added there are gerunds and take that pool from 132 to 130; the
+  other three (`frown`, `scowl`, `snarl`) take the nouns from 356 to 353.
+- **`randomName()` refuses to reuse the adjective as the noun.** 68 easy words
+  are both (`cold`, `chip`, `storm`) against 9 before, so `storm-twisting-storm`
+  went from one roll in 9,768 to one in 773. It filters the noun list rather
+  than rerolling in a `while`: with a one-word noun list that equals the
+  adjective — which the shipped lists cannot produce but `cliWithWords()` in the
+  tests can — a reroll loop never terminates. The fallback repeats the word, and
+  there is a test for each half. Dropping the overlap from either list instead
+  was rejected: it costs `green`, `cold` and `chill`, three of the best words in
+  both.
+
+  The guard stops at the exact repeat and that is deliberate. Sharing a *stem*
+  is about as likely — `sage-nesting-nest` at one in 805, `clean-cleaning-owl`
+  at one in 1,491, together one in 523 against the one in 773 that motivated the
+  guard — and is left alone, because `clean-cleaning-owl` reads as a coincidence
+  where `storm-twisting-storm` reads as a bug. Measured, so the scope is a
+  decision rather than an oversight.
+
+There is a test asserting the counts, the sort order, uniqueness and the
+character classes; it is the regression test for a hand-edit. A regeneration
+that moves a count is expected to move that test with it.
 
 ### I24. A random name is checked before it is offered, never after
 

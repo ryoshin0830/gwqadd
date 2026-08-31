@@ -2,6 +2,11 @@
 
 Design, 2026-08-26. Status: approved, not yet implemented.
 
+> **Superseded in 0.6.0.** The word lists are now filtered through EFF's short
+> wordlist, so the counts (216 / 109 / 407), the namespace (9,582,408), the
+> stride sampling and every sample name below are historical. `CLAUDE.md` I23
+> is the current record. Kept as the design's provenance, not as reference.
+
 ## The problem
 
 Today a `gwqadd` run with no positional costs the user a sentence and 6–8

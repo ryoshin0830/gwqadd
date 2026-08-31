@@ -997,139 +997,137 @@ function defaultBranch(dir) {
 // Adjectives and nouns: glitchdotcom/friendly-words, MIT (c) 2018 Glitch.
 // Gerunds: dariusk/corpora, CC0.
 //
-// The counts match `claude -w` (216 * 109 * 407 = 9,582,408 names); the words
-// deliberately do not. See the design doc for why they were not copied.
+// What keeps these readable to someone who does not read English all day is
+// EFF's short diceware wordlist, which EFF built from Ghent University's
+// word-familiarity data: five characters or fewer, no homophones, nothing hard
+// to spell. Every adjective and every noun here is a member of it. **No gerund
+// is, and none can be** — that list stops at five characters and these run six
+// to nine; what is easy about a gerund is its verb, so each was conjugated from
+// an infinitive the list holds (`cook` is there, `cooking` never could be).
+//
+// That is why the three lists are this small — 149 * 130 * 353 = 6,837,610
+// combinations, against the 9,582,408 of the revision that took whatever
+// friendly-words offered. `randomName()` below cannot reach 8,840 of them (the
+// 68 words that are both an adjective and a noun, times the gerunds), so the
+// number of names it actually hands out is 6,828,770.
 
 const ADJECTIVES = [
-  'aback', 'abrupt', 'achieved', 'adaptable', 'aerial', 'airy', 'alike',
-  'alpine', 'amplified', 'apricot', 'ash', 'available', 'azure', 'basalt',
-  'bejeweled', 'bevel', 'bloom', 'bold', 'boundless', 'branched', 'brawny',
-  'bright', 'bronzed', 'burly', 'butternut', 'cactus', 'candied', 'caramel',
-  'carpal', 'celestial', 'chambray', 'checkered', 'chestnut', 'chisel',
-  'citrine', 'clean', 'cloudy', 'coconut', 'colossal', 'concise', 'cookie',
-  'cord', 'creative', 'cuddly', 'cyber', 'daily', 'darkened', 'decorous',
-  'delicious', 'dented', 'diamond', 'dolomite', 'dune', 'early', 'educated',
-  'elated', 'elite', 'endurable', 'equinox', 'evergreen', 'expensive',
-  'faceted', 'familiar', 'fantastic', 'fearless', 'field', 'first', 'flannel',
-  'flax', 'flower', 'foremost', 'fortune', 'freckle', 'frill', 'furtive',
-  'garrulous', 'geode', 'ginger', 'glib', 'glorious', 'goldenrod', 'graceful',
-  'grass', 'grey', 'guiltless', 'half', 'happy', 'heathered', 'helpful',
-  'hill', 'honorable', 'humane', 'hurricane', 'icy', 'important', 'innate',
-  'iodized', 'island', 'jet', 'judicious', 'juvenile', 'knotty', 'languid',
-  'lavender', 'learned', 'level', 'lime', 'lively', 'lopsided', 'lumbar',
-  'luxurious', 'magical', 'malleable', 'marble', 'marred', 'massive', 'mellow',
-  'mercurial', 'mica', 'military', 'mire', 'modest', 'mousy', 'narrow',
-  'nebula', 'nice', 'ninth', 'numerous', 'occipital', 'olivine', 'orchid',
-  'ossified', 'pale', 'past', 'pear', 'perfect', 'petalite', 'picayune',
-  'pineapple', 'plaid', 'platinum', 'plume', 'polarized', 'polyester',
-  'prairie', 'private', 'proximal', 'pyrite', 'quickest', 'quilted', 'radical',
-  'raspy', 'regal', 'repeated', 'respected', 'ringed', 'road', 'romantic',
-  'round', 'rustic', 'salt', 'sapphire', 'scented', 'season', 'sedate',
-  'separate', 'shaded', 'sheer', 'shiny', 'shrub', 'silky', 'sincere',
-  'skitter', 'slimy', 'smooth', 'solar', 'southern', 'speckle', 'spiced',
-  'spiral', 'spotless', 'spurious', 'steel', 'stone', 'strong', 'subdued',
-  'sugar', 'sumptuous', 'superb', 'sweet', 'tame', 'tartan', 'temporal',
-  'thankful', 'thoracic', 'tide', 'tiny', 'torpid', 'tropical', 'tundra',
-  'typhoon', 'unique', 'upbeat', 'valiant', 'vast', 'verbose', 'violet',
-  'volcano', 'water', 'west', 'wholesale', 'winter', 'wobbly', 'woolen',
-  'young', 'zest'
+  'aged', 'ahead', 'ajar', 'alike', 'alive', 'apple', 'atom', 'awake', 'blend',
+  'blush', 'brick', 'broad', 'brook', 'busy', 'cake', 'calm', 'candy', 'cedar',
+  'chain', 'charm', 'chief', 'chill', 'chip', 'clean', 'clear', 'cloud',
+  'cold', 'copy', 'coral', 'daily', 'dandy', 'dawn', 'denim', 'dent', 'dot',
+  'dust', 'early', 'east', 'equal', 'even', 'false', 'fancy', 'fifth', 'five',
+  'flame', 'flint', 'foam', 'fog', 'foil', 'fresh', 'frill', 'frost', 'gem',
+  'glass', 'glow', 'good', 'goofy', 'grape', 'grass', 'gray', 'green', 'half',
+  'happy', 'icy', 'iron', 'ivy', 'jelly', 'jet', 'jolly', 'kiwi', 'lake',
+  'lemon', 'level', 'lilac', 'lunar', 'mango', 'mousy', 'mud', 'navy', 'near',
+  'neat', 'neon', 'ninth', 'oasis', 'oil', 'olive', 'open', 'oval', 'palm',
+  'paper', 'patch', 'petal', 'plant', 'prism', 'prong', 'quiet', 'quill',
+  'quilt', 'relic', 'rich', 'ritzy', 'river', 'rogue', 'royal', 'rust', 'sage',
+  'salt', 'same', 'sandy', 'satin', 'sepia', 'shade', 'sharp', 'shell',
+  'shine', 'shiny', 'shore', 'showy', 'silk', 'silly', 'sixth', 'sky', 'sleet',
+  'slimy', 'small', 'snowy', 'spiny', 'spot', 'steep', 'storm', 'stump',
+  'sugar', 'surf', 'tall', 'tasty', 'thorn', 'tidal', 'tidy', 'tiny', 'tree',
+  'tulip', 'water', 'wheat', 'wind', 'wiry', 'wise', 'wool', 'zesty', 'zippy'
 ];
 
 const GERUNDS = [
-  'abiding', 'adding', 'affording', 'amazing', 'appearing', 'asking',
-  'attracting', 'baring', 'behaving', 'blotting', 'booking', 'boxing',
-  'brushing', 'bustling', 'carrying', 'charming', 'chopping', 'clipping',
-  'colouring', 'completing', 'continuing', 'counting', 'curing', 'daring',
-  'delighting', 'deserving', 'doubling', 'dropping', 'employing', 'escaping',
-  'exercising', 'exploding', 'fastening', 'filling', 'floating', 'flying',
-  'forming', 'gathering', 'gluing', 'guessing', 'hanging', 'heating',
-  'hopping', 'hunting', 'including', 'intending', 'joining', 'kicking',
-  'knowing', 'launching', 'licking', 'listing', 'loving', 'matching',
-  'melting', 'mining', 'muddling', 'nesting', 'obeying', 'offering', 'owning',
-  'parting', 'pedaling', 'phoning', 'planning', 'poking', 'pouring',
-  'preferring', 'printing', 'pulling', 'pushing', 'raining', 'recording',
-  'rejoicing', 'reminding', 'replying', 'returning', 'rotating', 'sailing',
-  'scorching', 'sealing', 'shading', 'shining', 'signing', 'slapping',
-  'smiling', 'snoring', 'sparing', 'spotting', 'squeaking', 'standing',
-  'stepping', 'stretching', 'suggesting', 'surprising', 'taming', 'testing',
-  'ticking', 'touching', 'trading', 'trusting', 'tying', 'unpacking',
-  'wailing', 'warming', 'weighing', 'whistling', 'wondering', 'yawning'
+  'amusing', 'blessing', 'blinking', 'blotting', 'blushing', 'boasting',
+  'boiling', 'bolting', 'booking', 'brushing', 'buzzing', 'carrying',
+  'carving', 'causing', 'chasing', 'cheering', 'chewing', 'chopping',
+  'claiming', 'cleaning', 'clearing', 'clipping', 'coaching', 'coiling',
+  'copying', 'coughing', 'covering', 'crawling', 'crossing', 'curing',
+  'curling', 'curving', 'cycling', 'dancing', 'dressing', 'drying', 'dusting',
+  'entering', 'fading', 'fancying', 'faxing', 'fencing', 'fetching', 'filming',
+  'fitting', 'floating', 'founding', 'framing', 'glowing', 'gluing',
+  'greeting', 'gripping', 'guiding', 'heaping', 'heating', 'helping',
+  'hugging', 'hunting', 'hurrying', 'judging', 'jumping', 'kicking', 'landing',
+  'lasting', 'leveling', 'listing', 'marching', 'marrying', 'matching',
+  'mating', 'moving', 'nailing', 'naming', 'nesting', 'opening', 'parking',
+  'planting', 'pointing', 'pressing', 'printing', 'pulling', 'pushing',
+  'racing', 'reaching', 'relaxing', 'replying', 'rhyming', 'rinsing',
+  'rocking', 'ruling', 'rushing', 'scrubbing', 'serving', 'shading', 'sharing',
+  'shopping', 'sipping', 'skipping', 'slipping', 'smashing', 'smelling',
+  'smiling', 'sniffing', 'snoring', 'spilling', 'spotting', 'spraying',
+  'staining', 'stamping', 'starting', 'stepping', 'stirring', 'stuffing',
+  'tasting', 'thanking', 'thawing', 'tracing', 'trading', 'training',
+  'treating', 'trying', 'twisting', 'walking', 'watching', 'watering',
+  'winking', 'wiping', 'wishing', 'working', 'zooming'
 ];
 
 const NOUNS = [
-  'aardvark', 'acorn', 'actress', 'aftermath', 'air', 'airport', 'alibi',
-  'almanac', 'aluminum', 'amp', 'ancient', 'anise', 'antimony', 'apology',
-  'appliance', 'archduke', 'armchair', 'article', 'asterisk', 'attempt',
-  'author', 'axolotl', 'bag', 'ball', 'barbecue', 'barn', 'barracuda',
-  'basket', 'bathtub', 'beak', 'bearskin', 'bedbug', 'beginner', 'beluga',
-  'bicycle', 'birch', 'bit', 'blarney', 'blouse', 'boat', 'bongo', 'booth',
-  'bow', 'braid', 'brass', 'breath', 'broccoli', 'brow', 'buckaroo', 'buffet',
-  'bun', 'butter', 'cabbage', 'cafe', 'camera', 'candytuft', 'cap', 'caption',
-  'carbon', 'caribou', 'carpet', 'carver', 'cat', 'catmint', 'ceder', 'cello',
-  'centipede', 'chair', 'change', 'chauffeur', 'chemistry', 'chevre', 'chill',
-  'chive', 'cicada', 'cirrus', 'clarinet', 'click', 'clock', 'clover', 'coat',
-  'cockroach', 'cold', 'colossus', 'comfort', 'concrete', 'conifer', 'copy',
-  'corn', 'couch', 'course', 'cowl', 'crate', 'creature', 'cricket', 'crow',
-  'cub', 'cupcake', 'curve', 'cylinder', 'dancer', 'dataset', 'decade', 'den',
-  'desk', 'dewberry', 'dichondra', 'dinghy', 'discovery', 'dogwood', 'donut',
-  'drain', 'drifter', 'drizzle', 'duckling', 'durian', 'earth', 'echo',
-  'education', 'elbow', 'elm', 'energy', 'entree', 'ermine', 'evergreen',
-  'eyebrow', 'falcon', 'farm', 'feather', 'femur', 'ferret', 'fibre', 'figure',
-  'fine', 'flag', 'flavor', 'flood', 'flyaway', 'football', 'form', 'foxtail',
-  'freedom', 'friction', 'frog', 'function', 'galley', 'garage', 'garnet',
-  'gauge', 'gemini', 'gerbera', 'ginger', 'glasses', 'glow', 'golf', 'gouda',
-  'gram', 'grey', 'group', 'guarantee', 'gull', 'haddock', 'hallway',
-  'handsaw', 'hare', 'hawthorn', 'health', 'heaven', 'hellebore', 'herring',
-  'hiss', 'homegrown', 'hoof', 'hose', 'hourglass', 'humerus', 'hydrangea',
-  'hyphen', 'icon', 'income', 'ink', 'iron', 'jacket', 'jasmine', 'jellyfish',
-  'jodhpur', 'judge', 'juniper', 'kayak', 'keyboard', 'king', 'knee', 'krill',
-  'lake', 'land', 'larkspur', 'launch', 'lead', 'legal', 'lemur', 'letter',
-  'license', 'lighter', 'limpet', 'lion', 'liver', 'lobster', 'logic', 'lunch',
-  'lychee', 'macaw', 'magician', 'mailbox', 'mallow', 'mandible', 'manta',
-  'march', 'market', 'mars', 'mastodon', 'may', 'medallion', 'memory',
-  'meteoroid', 'midnight', 'mine', 'mirror', 'molasses', 'money', 'moon',
-  'mosquito', 'mountain', 'muenster', 'museum', 'mustang', 'napkin', 'nebula',
-  'neon', 'net', 'newt', 'nitrogen', 'nurse', 'oatmeal', 'octagon', 'office',
-  'onion', 'opinion', 'orca', 'origami', 'ounce', 'owl', 'pail', 'pan',
-  'panther', 'papyrus', 'park', 'particle', 'passive', 'path', 'pea', 'pear',
-  'pencil', 'perch', 'pet', 'pharaoh', 'piccolo', 'pig', 'pin', 'piper',
-  'place', 'plant', 'platypus', 'plot', 'plutonium', 'polyester', 'porter',
-  'potato', 'prawn', 'prince', 'process', 'proof', 'ptarmigan', 'puppet',
-  'pyramid', 'quart', 'quill', 'quotation', 'radiator', 'raft', 'rainstorm',
-  'range', 'reaction', 'recess', 'region', 'repair', 'research', 'reward',
-  'riddle', 'riverbed', 'rock', 'rook', 'rosemary', 'rubidium', 'runner',
-  'saguaro', 'salary', 'salute', 'sapphire', 'saturn', 'saxophone', 'scapula',
-  'school', 'scooter', 'screen', 'seaplane', 'second', 'seer', 'server',
-  'shallot', 'shear', 'shift', 'shop', 'shroud', 'silence', 'silver', 'skull',
-  'slice', 'slipper', 'smoke', 'sneeze', 'snowman', 'soarer', 'sodalite',
-  'sole', 'soul', 'soy', 'spark', 'spectrum', 'spider', 'split', 'sprint',
-  'spy', 'stage', 'station', 'step', 'sting', 'stocking', 'story', 'streetcar',
-  'subject', 'suit', 'sundial', 'sunspot', 'surgeon', 'sweater', 'swordfish',
-  'system', 'tailor', 'tangelo', 'target', 'tartan', 'teal', 'tellurium',
-  'tent', 'textbook', 'thorium', 'throne', 'tick', 'tile', 'tip', 'toast',
-  'topaz', 'town', 'traffic', 'traveler', 'tricorne', 'trouser', 'trust',
-  'tugboat', 'turkey', 'turret', 'twine', 'uncle', 'vacation', 'variety',
-  'vein', 'vertebra', 'viola', 'viscose', 'voice', 'walk', 'walleye',
-  'warbler', 'wasp', 'wave', 'weaver', 'whale', 'whitefish', 'wineberry',
-  'wisteria', 'wolfsbane', 'woolen', 'wrinkle', 'xylophone', 'yarrow', 'zebra',
-  'zinnia'
+  'acorn', 'alibi', 'angle', 'ankle', 'apple', 'area', 'army', 'art', 'atom',
+  'attic', 'bagel', 'barge', 'barn', 'basil', 'bath', 'blade', 'boat', 'bolt',
+  'book', 'booth', 'brick', 'brook', 'broom', 'brush', 'cadet', 'cake',
+  'candy', 'card', 'carol', 'case', 'cause', 'chair', 'cheek', 'chef', 'chess',
+  'chili', 'chill', 'chip', 'city', 'class', 'click', 'cloak', 'clock',
+  'cloth', 'cloud', 'coast', 'coat', 'cod', 'coil', 'cold', 'colt', 'comic',
+  'comma', 'cone', 'copy', 'coral', 'cork', 'cost', 'couch', 'cough', 'cover',
+  'crane', 'crate', 'crepe', 'crib', 'crop', 'cross', 'crowd', 'crown', 'cub',
+  'curve', 'cycle', 'dance', 'dart', 'dash', 'data', 'date', 'dawn', 'deal',
+  'denim', 'derby', 'desk', 'dill', 'dime', 'dish', 'donut', 'dove', 'draw',
+  'dress', 'drill', 'drive', 'drum', 'dry', 'duck', 'duke', 'dust', 'eagle',
+  'earth', 'echo', 'edge', 'eel', 'elbow', 'elf', 'elk', 'elm', 'emu', 'fact',
+  'fall', 'fang', 'feast', 'femur', 'ferry', 'fiber', 'fifth', 'finch', 'flag',
+  'flame', 'flock', 'floss', 'foam', 'fog', 'food', 'fox', 'frame', 'frill',
+  'front', 'frost', 'fruit', 'game', 'gas', 'gear', 'gecko', 'gem', 'giver',
+  'glass', 'glove', 'glow', 'glue', 'goal', 'golf', 'gong', 'grain', 'grape',
+  'grass', 'gray', 'green', 'grill', 'grip', 'guide', 'heat', 'hedge', 'help',
+  'hub', 'ice', 'icon', 'iron', 'jam', 'jeep', 'jet', 'judge', 'juice', 'jump',
+  'jury', 'kick', 'king', 'kite', 'kiwi', 'knee', 'koala', 'lake', 'land',
+  'legal', 'lemon', 'lens', 'level', 'lever', 'lift', 'lilac', 'line', 'lint',
+  'lion', 'lip', 'list', 'liver', 'lunch', 'lung', 'lyric', 'mango', 'map',
+  'march', 'match', 'math', 'motor', 'mouse', 'mouth', 'move', 'movie', 'mule',
+  'muse', 'music', 'nail', 'name', 'navy', 'neon', 'nest', 'net', 'niece',
+  'oak', 'ocean', 'oil', 'olive', 'onion', 'opal', 'open', 'opera', 'otter',
+  'ounce', 'oval', 'owl', 'palm', 'panda', 'paper', 'park', 'party', 'pasta',
+  'patch', 'path', 'patio', 'perch', 'plank', 'plant', 'plot', 'plow', 'print',
+  'proof', 'prune', 'quiet', 'quill', 'quilt', 'quit', 'radar', 'radio',
+  'raft', 'rail', 'rake', 'range', 'raven', 'reply', 'rice', 'rise', 'river',
+  'roast', 'rock', 'rover', 'ruby', 'rule', 'sage', 'salad', 'salsa', 'salt',
+  'satin', 'scale', 'scarf', 'shade', 'shape', 'share', 'sheep', 'sheet',
+  'shelf', 'shell', 'ship', 'shirt', 'shop', 'silk', 'skate', 'skirt', 'sky',
+  'sled', 'sleep', 'sleet', 'slice', 'slip', 'slug', 'smile', 'snap', 'snout',
+  'speak', 'spoon', 'spot', 'spur', 'squid', 'stage', 'stamp', 'steam', 'stem',
+  'step', 'stew', 'stick', 'sting', 'stock', 'storm', 'stove', 'straw',
+  'sugar', 'surf', 'sushi', 'swan', 'swim', 'swing', 'swoop', 'syrup', 'talon',
+  'tank', 'thing', 'thorn', 'thumb', 'tiger', 'tile', 'track', 'trade',
+  'train', 'tray', 'tree', 'truck', 'trunk', 'tulip', 'twine', 'twist',
+  'uncle', 'value', 'verse', 'vest', 'visor', 'voice', 'wake', 'walk', 'wasp',
+  'watch', 'water', 'wind', 'wing', 'wish', 'wok', 'wolf', 'wool', 'word',
+  'work', 'wrist', 'yam', 'yard', 'year', 'zebra', 'zone'
 ];
 
 // ── random names ─────────────────────────────────────────────────────────────
 
 // crypto, not Math.random: two shells started in the same second must not be
 // able to agree on a branch name. The modulo biases the first few words of each
-// list upward by about 407 / 2^32, which is invisible at any number of branches
+// list upward by about 353 / 2^32, which is invisible at any number of branches
 // a person will ever create.
 const pick = (a) => a[randomBytes(4).readUInt32BE(0) % a.length];
-const randomName = () => `${pick(ADJECTIVES)}-${pick(GERUNDS)}-${pick(NOUNS)}`;
+
+// 68 easy words are both an adjective and a noun — `cold`, `chip`, `storm` —
+// against 9 before the lists were cut to words people actually know, so
+// `storm-twisting-storm` went from one roll in 9,768 to one in 773 and became
+// worth guarding. Dropping the overlap from either list instead would cost
+// `green`, `cold` and `chill`, three of the best words in both.
+//
+// The guard filters rather than rerolling in a `while`, which would never end
+// if the only noun left is the adjective. The shipped lists cannot reach that
+// state; a shrunken copy of them can, and the tests use exactly such a copy.
+// The fallback repeats the word, because a name beats a hang.
+const randomName = () => {
+  const adjective = pick(ADJECTIVES);
+  const nouns = NOUNS.filter((w) => w !== adjective);
+  return `${adjective}-${pick(GERUNDS)}-${pick(nouns.length ? nouns : NOUNS)}`;
+};
 
 const RANDOM_TRIES = 10;
 
 // `claude -w` lets a collision become a hard error; we reroll instead. The
 // check has to happen before the name is shown, so the confirmation prompt can
 // never offer something that cannot be created (I24). Ten failures in a
-// 9,582,408-name space means our randomness is broken, not the user's luck.
+// 6,828,770-name space means our randomness is broken, not the user's luck.
 //
 // The branch check alone is enough, and a `worktreePath()` call beside it would
 // be unreachable: `git worktree list --porcelain` only prints `branch
