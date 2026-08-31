@@ -308,6 +308,14 @@ repository's convention, and the shape is the point: three hyphenated words with
 no slash is not a shape a person types, so `git branch` output separates real
 branches from scratch worktrees at a glance.
 
+The easy-word filter (I23) took some of the force out of that last clause and it
+is worth saying so: `petalite-scorching-ptarmigan` announced itself, while
+`tidy-dancing-kite` is three words a person could plausibly have typed. **The
+no-slash rule is now doing most of the separating**, and it is enough — every
+convention this tool has ever seen in a real repository prefixes with one. Do
+not add a marker to win the rest back; a random name that has to be tagged as
+random is worse than one you read twice.
+
 ### I19. One confirmation, and "no" goes back to the description
 
 `confirmCreate()` is the only checkpoint. `n` returns to the description prompt
@@ -441,6 +449,13 @@ guessed:
   there is a test for each half. Dropping the overlap from either list instead
   was rejected: it costs `green`, `cold` and `chill`, three of the best words in
   both.
+
+  The guard stops at the exact repeat and that is deliberate. Sharing a *stem*
+  is about as likely — `sage-nesting-nest` at one in 805, `clean-cleaning-owl`
+  at one in 1,491, together one in 523 against the one in 773 that motivated the
+  guard — and is left alone, because `clean-cleaning-owl` reads as a coincidence
+  where `storm-twisting-storm` reads as a bug. Measured, so the scope is a
+  decision rather than an oversight.
 
 There is a test asserting the counts, the sort order, uniqueness and the
 character classes; it is the regression test for a hand-edit. A regeneration

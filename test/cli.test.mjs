@@ -176,6 +176,18 @@ test('--cmd renames the emitted function', () => {
 // shows up here as a wrong count, a duplicate or a stray character.
 const source = readFileSync(BIN, 'utf8');
 
+// One spelling of each shape, composed rather than repeated: `RANDOM_SHAPE` and
+// the offered-name scan below are built from these, so widening one bound
+// cannot leave the others behind — which is how {3,10} and {5,10} once
+// disagreed across three lines of this file.
+//
+// WORD is {3,5} because every adjective and noun is a member of EFF's short
+// wordlist, which caps at five characters. That is the one mechanical check
+// left for the easy-word guarantee now that the list itself is not shipped:
+// {3,9} admitted `petalite` and `candytuft`, the very words this filter removed.
+const WORD = '[a-z]{3,5}';
+const GERUND = '[a-z]{5,10}';
+
 function wordList(name) {
   const m = source.match(new RegExp(`const ${name} = \\[([^\\]]*)\\]`));
   assert.ok(m, `${name} not found in bin/gwqadd.mjs`);
@@ -184,9 +196,9 @@ function wordList(name) {
 
 test('the generated word lists have the shape the generator assumes', () => {
   for (const [name, count, shape] of [
-    ['ADJECTIVES', 149, /^[a-z]{3,9}$/],
-    ['GERUNDS', 130, /^[a-z]{5,10}$/],
-    ['NOUNS', 353, /^[a-z]{3,9}$/],
+    ['ADJECTIVES', 149, new RegExp(`^${WORD}$`)],
+    ['GERUNDS', 130, new RegExp(`^${GERUND}$`)],
+    ['NOUNS', 353, new RegExp(`^${WORD}$`)],
   ]) {
     const words = wordList(name);
     assert.equal(words.length, count, `${name}: expected ${count} words`);
@@ -565,7 +577,7 @@ test('r rerolls to a different name', (t) => {
     'exit [lindex $result 3]',
   ], ai);
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
-  const offered = [...new Set(r.stdout.match(/[a-z]{3,9}-[a-z]{5,10}-[a-z]{3,9}/g) ?? [])];
+  const offered = [...new Set(r.stdout.match(new RegExp(`${WORD}-${GERUND}-${WORD}`, 'g')) ?? [])];
   assert.ok(offered.length >= 2, `r must produce a new name, saw: ${offered.join(', ')}`);
 });
 
@@ -750,7 +762,7 @@ test('re-sourcing is idempotent even with a stale function defined', (t) => {
 
 // ── random names ─────────────────────────────────────────────────────────────
 
-const RANDOM_SHAPE = /^[a-z]{3,9}-[a-z]{5,10}-[a-z]{3,9}$/;
+const RANDOM_SHAPE = new RegExp(`^${WORD}-${GERUND}-${WORD}$`);
 
 test('--random names and creates a branch with no terminal and no AI', () => {
   const ai = canaryAi();

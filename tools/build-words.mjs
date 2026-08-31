@@ -115,6 +115,20 @@ function wrap(words, width = 76) {
 // 407 so the namespace matched `claude -w` exactly; once the easy-word filter
 // decides which words are allowed at all, that target has nothing behind it,
 // and throwing away two thirds of an already small pool only costs names.
+//
+// stride() used to throw when a pool could not fill its quota, which is the
+// only reason an upstream going missing was ever loud. Without it a fetch that
+// returns an empty list, or a schema change that makes every `easy.has()` miss,
+// prints three tiny arrays and exits 0 — and the count assertion in the test
+// suite catches that only after a maintainer has pasted them in.
+for (const [name, pool] of [
+  ['ADJECTIVES', adjectives], ['GERUNDS', gerunds], ['NOUNS', nouns],
+]) {
+  if (pool.length < 100) {
+    throw new Error(`${name} collapsed to ${pool.length} words — check the upstreams`);
+  }
+}
+
 process.stderr.write(
   `pools: ${adjectives.length} adjectives, ${gerunds.length} gerunds, `
   + `${nouns.length} nouns = `
