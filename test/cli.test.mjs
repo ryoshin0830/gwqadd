@@ -453,7 +453,33 @@ function canaryAi() {
   return { dir, bin, marker, called: () => existsSync(marker) };
 }
 
-function runInteractiveExpect(lines, ai, args = []) {
+function fallbackAis() {
+  const dir = mkdtempSync(join(tmpdir(), 'gwqadd-fallback-'));
+  const claudeMarker = join(dir, 'claude-called');
+  const codexMarker = join(dir, 'codex-called');
+  const claude = join(dir, 'claude');
+  const codex = join(dir, 'codex');
+  writeFileSync(claude, `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "claude test"; exit 0; fi
+echo called >> ${claudeMarker}
+echo "claude unavailable" >&2
+exit 1
+`);
+  writeFileSync(codex, `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "codex test"; exit 0; fi
+echo called >> ${codexMarker}
+printf 'feat/codex-fallback\\nfeat/codex-second\\nfeat/codex-third\\n'
+`);
+  chmodSync(claude, 0o755);
+  chmodSync(codex, 0o755);
+  return {
+    dir,
+    calledClaude: () => existsSync(claudeMarker),
+    calledCodex: () => existsSync(codexMarker),
+  };
+}
+
+function runInteractiveExpect(lines, ai, args = [], extraEnv = {}) {
   const script = join(sandbox, 'interactive.exp');
   writeFileSync(script, [
     'set timeout 5',
@@ -466,8 +492,10 @@ function runInteractiveExpect(lines, ai, args = []) {
     ...process.env,
     PATH: `${shimDir}:${process.env.PATH}`,
     NO_COLOR: '1',
-    GWQADD_AI: ai.bin,
   };
+  if (ai) env.GWQADD_AI = ai.bin;
+  else delete env.GWQADD_AI;
+  Object.assign(env, extraEnv);
   delete env.FORCE_COLOR;
   return spawnSync('expect', [script, process.execPath, BIN], {
     cwd: repo,
@@ -589,6 +617,27 @@ test('n at the rolled name falls through to the AI', (t) => {
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
   assert.equal(ai.called(), true, 'n is what buys the AI round trip');
   assert.equal(branchExists('feat/a'), true);
+});
+
+test('a failed automatically detected Claude falls back to Codex', (t) => {
+  if (spawnSync('expect', ['-v'], { stdio: 'ignore' }).error) {
+    return t.skip('expect not installed');
+  }
+  const ais = fallbackAis();
+  t.after(() => rmSync(ais.dir, { recursive: true, force: true }));
+  const r = runInteractiveExpect([
+    'expect "what do you want to do?"',
+    'send -- "fix the login bug\\r"',
+    'expect "create it?"',
+    'send -- "Y"',
+    'expect eof',
+    'set result [wait]',
+    'exit [lindex $result 3]',
+  ], null, ['--no-random'], { PATH: `${ais.dir}:${shimDir}:${process.env.PATH}` });
+  assert.equal(r.status, 0, `${r.stdout}\\n${r.stderr}`);
+  assert.equal(ais.calledClaude(), true, 'Claude must be attempted first');
+  assert.equal(ais.calledCodex(), true, 'Codex must be attempted after Claude fails');
+  assert.equal(branchExists('feat/codex-fallback'), true);
 });
 
 test('a branch name on the command line never reaches the AI', () => {
