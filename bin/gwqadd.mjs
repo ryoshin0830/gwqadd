@@ -76,10 +76,11 @@ NAMING HELP
   modified, so the AI picks the prefix and the wording that match the repo. A
   rejected suggestion is passed back as an exclusion, so "n" does not return it.
 
-  The AI is whichever of these is on PATH — claude, codex, opencode, gemini —
-  invoked headlessly. Nothing is sent anywhere until you answer the question,
-  and nothing is created until you confirm. Override with --ai '<cmd>' or
-  GWQADD_AI='<cmd>'; disable with --no-ai or GWQADD_AI=off, which leaves a plain
+  Automatic detection tries claude -p first, then codex exec if Claude fails or
+  returns no usable name, followed by opencode run and gemini -p. Nothing is
+  sent anywhere until you answer the question, and nothing is created until you
+  confirm. Override with --ai '<cmd>' or GWQADD_AI='<cmd>' to use one command
+  explicitly; disable with --no-ai or GWQADD_AI=off, which leaves a plain
   prompt for an ASCII name.
 
   --no-random (or GWQADD_RANDOM=off) starts at the description prompt instead.
@@ -1243,9 +1244,15 @@ function detectAi() {
     if (['off', '0', 'false', 'none'].includes(override)) return null;
     // Split on whitespace only: quoting rules would be a shell of our own.
     const parts = override.split(/\s+/).filter(Boolean);
-    return { bin: parts[0], args: parts.slice(1) };
+    return {
+      candidates: [{ bin: parts[0], args: parts.slice(1) }],
+      automatic: false,
+    };
   }
-  return AI_CLIS.find((c) => commandExists(c.bin)) ?? null;
+  return {
+    candidates: AI_CLIS.filter((c) => commandExists(c.bin)),
+    automatic: true,
+  };
 }
 
 // These CLIs are agents, not text transformers: run one inside a repository and
@@ -1433,11 +1440,14 @@ async function composeBranchName(dir, repo, base) {
     if (chosen) return chosen;
   }
 
-  const ai = detectAi();
-  if (!ai) return { branch: await typeItYourself(), named: 'manual' };
+  const selection = detectAi();
+  if (!selection || selection.candidates.length === 0) {
+    return { branch: await typeItYourself(), named: 'manual' };
+  }
 
   const ctx = repoContext(dir, repo, base);
   const rejected = [];
+  let aiIndex = 0;
 
   for (;;) {
     log(`${dim('│')}`);
@@ -1447,17 +1457,23 @@ async function composeBranchName(dir, repo, base) {
     // An empty answer is the escape hatch out of the AI entirely.
     if (!description) return { branch: await typeItYourself(), named: 'manual' };
 
-    const res = await askAi(ai, namingPrompt(ctx, description, rejected));
-    if (!res.ok) {
-      warn(`${aiLabel(ai)} failed — name it yourself instead`);
+    let ai;
+    let candidates;
+    for (;;) {
+      ai = selection.candidates[aiIndex];
+      const res = await askAi(ai, namingPrompt(ctx, description, rejected));
+      candidates = res.ok ? parseCandidates(res.out) : [];
+      if (res.ok && candidates.length > 0) break;
+
+      const reason = res.ok ? 'returned nothing usable' : 'failed';
+      const next = selection.automatic
+        ? selection.candidates[aiIndex + 1]
+        : null;
+      warn(`${aiLabel(ai)} ${reason} — ${next ? `trying ${aiLabel(next)} instead` : 'name it yourself instead'}`);
       const first = (res.err || '').trim().split('\n')[0];
       if (first) log(`${dim('│')} ${dim(first.slice(0, 120))}`);
-      return { branch: await typeItYourself(), named: 'manual' };
-    }
-    const candidates = parseCandidates(res.out);
-    if (candidates.length === 0) {
-      warn(`${aiLabel(ai)} returned nothing usable — name it yourself instead`);
-      return { branch: await typeItYourself(), named: 'manual' };
+      if (!next) return { branch: await typeItYourself(), named: 'manual' };
+      aiIndex++;
     }
 
     const choice = await confirmCreate(candidates[0], ctx.base);
