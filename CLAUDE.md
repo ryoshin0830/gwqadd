@@ -262,7 +262,8 @@ Keep them.
 
 ### I16. Delegate to an installed AI CLI; never embed an API client
 
-The suggestion layer shells out to `claude -p` / `codex exec` /
+The suggestion layer shells out to `claude -p` / `codex exec
+--skip-git-repo-check` /
 `opencode run` / `gemini -p`, whichever is on `PATH`, overridable with `--ai`
 or `GWQADD_AI`. This is deliberate:
 

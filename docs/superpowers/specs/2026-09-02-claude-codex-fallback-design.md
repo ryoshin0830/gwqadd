@@ -3,13 +3,14 @@
 ## Goal
 
 When the interactive branch-name flow automatically selects `claude -p` and
-Claude cannot produce a usable suggestion, try `codex exec` with the same
-prompt before asking the user to name the branch manually.
+Claude cannot produce a usable suggestion, try `codex exec
+--skip-git-repo-check` with the same prompt before asking the user to name the
+branch manually.
 
 ## Scope and behavior
 
-- The automatic CLI order remains `claude -p`, `codex exec`, `opencode run`,
-  then `gemini -p`.
+- The automatic CLI order remains `claude -p`, `codex exec
+  --skip-git-repo-check`, `opencode run`, then `gemini -p`.
 - Automatic detection returns an ordered list of installed candidates instead
   of committing to the first installed command. A candidate is exhausted when
   it cannot start, exits unsuccessfully, or returns no parseable branch names.
@@ -21,8 +22,9 @@ prompt before asking the user to name the branch manually.
   does not acquire implicit fallback behavior. `--no-ai` remains unchanged.
 - If every automatic candidate fails, the existing manual ASCII-name prompt and
   its error messaging remain the final fallback.
-- `codex` is invoked as `codex exec <prompt>`, matching the installed CLI's
-  documented non-interactive command.
+- `codex` is invoked as `codex exec --skip-git-repo-check <prompt>`, matching
+  the installed CLI's documented non-interactive command and allowing it to
+  run in the intentionally empty working directory.
 
 ## Implementation shape
 

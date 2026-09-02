@@ -13,9 +13,11 @@
 - Preserve zero runtime dependencies and the existing Node.js engine floor.
 - Preserve stdout/stderr discipline: AI diagnostics and fallback warnings go to stderr; stdout remains the path/JSON channel.
 - Preserve non-interactive behavior: no AI process runs unless an explicit `--random` path is requested; a positional branch name never reaches AI.
-- Invoke Codex as `codex exec <prompt>`, as confirmed by `codex exec --help`.
+- Invoke Codex as `codex exec --skip-git-repo-check <prompt>`, as confirmed by
+  `codex exec --help`; the flag is required for the intentionally empty AI cwd.
 - Do not add implicit fallback to an explicit `--ai` or `GWQADD_AI` command.
-- Keep the automatic order `claude -p`, `codex exec`, `opencode run`, `gemini -p`.
+- Keep the automatic order `claude -p`, `codex exec --skip-git-repo-check`,
+  `opencode run`, `gemini -p`.
 - Run the complete `npm test` suite before claiming completion or creating the PR.
 
 ---
@@ -84,7 +86,7 @@ Keep `aiIndex` unchanged after a successful response so a rejected suggestion is
 
 - [ ] **Step 3: Update help and README wording**
 
-In the `NAMING HELP` text in `bin/gwqadd.mjs`, state that automatic detection tries `claude -p` first and tries `codex exec` when Claude fails or returns no usable name, followed by the existing opencode and gemini candidates. State that `--ai` and `GWQADD_AI` explicitly select one command and therefore do not activate implicit fallback.
+In the `NAMING HELP` text in `bin/gwqadd.mjs`, state that automatic detection tries `claude -p` first and tries `codex exec --skip-git-repo-check` when Claude fails or returns no usable name, followed by the existing opencode and gemini candidates. State that `--ai` and `GWQADD_AI` explicitly select one command and therefore do not activate implicit fallback.
 
 Update the corresponding AI paragraph in `README.md` with the same behavior and the exact `codex exec` invocation.
 

@@ -139,13 +139,15 @@ One question, one confirmation:
 **The AI** is whichever of these is on your `PATH`:
 
 ```
-claude -p    →    codex exec (if Claude fails)    →    opencode run    →    gemini -p
+claude -p    →    codex exec --skip-git-repo-check (if Claude fails)    →    opencode run    →    gemini -p
 ```
 
-Automatic detection tries Claude first and falls back to `codex exec` when it
-fails or returns no usable branch name, then continues through the other
-available CLIs. An explicit `--ai '<cmd>'` or `GWQADD_AI='<cmd>'` selects one
-command and keeps the existing manual fallback if that command fails.
+Automatic detection tries Claude first and falls back to
+`codex exec --skip-git-repo-check` when it fails or returns no usable branch
+name, then continues through the other available CLIs. The flag is required
+because the AI runs in an empty directory rather than the user's repository.
+An explicit `--ai '<cmd>'` or `GWQADD_AI='<cmd>'` selects one command and keeps
+the existing manual fallback if that command fails.
 
 No API key to obtain, no account to create — it uses what you already have.
 Expect 6–8 seconds, almost all of it the CLI's own start-up; an elapsed counter
