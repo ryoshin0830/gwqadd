@@ -76,12 +76,12 @@ NAMING HELP
   modified, so the AI picks the prefix and the wording that match the repo. A
   rejected suggestion is passed back as an exclusion, so "n" does not return it.
 
-  Automatic detection tries claude -p first, then codex exec if Claude fails or
-  returns no usable name, followed by opencode run and gemini -p. Nothing is
-  sent anywhere until you answer the question, and nothing is created until you
-  confirm. Override with --ai '<cmd>' or GWQADD_AI='<cmd>' to use one command
-  explicitly; disable with --no-ai or GWQADD_AI=off, which leaves a plain
-  prompt for an ASCII name.
+  Automatic detection tries claude -p first, then codex exec
+  --skip-git-repo-check if Claude fails or returns no usable name, followed by
+  opencode run and gemini -p. Nothing is sent anywhere until you answer the
+  question, and nothing is created until you confirm. Override with --ai '<cmd>'
+  or GWQADD_AI='<cmd>' to use one command explicitly; disable with --no-ai or
+  GWQADD_AI=off, which leaves a plain prompt for an ASCII name.
 
   --no-random (or GWQADD_RANDOM=off) starts at the description prompt instead.
   --random goes the other way and never asks; it is the only naming path that
@@ -1229,7 +1229,9 @@ function namingPrompt(ctx, description, rejected) {
 // answers a bare prompt headlessly.
 const AI_CLIS = [
   { bin: 'claude', args: ['-p'] },
-  { bin: 'codex', args: ['exec'] },
+  // runAi() deliberately uses an empty, non-Git directory; Codex requires this
+  // opt-out of its repository check before it will accept that working root.
+  { bin: 'codex', args: ['exec', '--skip-git-repo-check'] },
   { bin: 'opencode', args: ['run'] },
   { bin: 'gemini', args: ['-p'] },
 ];

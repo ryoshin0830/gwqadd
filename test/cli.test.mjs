@@ -467,6 +467,10 @@ exit 1
 `);
   writeFileSync(codex, `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "codex test"; exit 0; fi
+if [ "$1" != "exec" ] || [ "$2" != "--skip-git-repo-check" ]; then
+  echo "codex was not given --skip-git-repo-check" >&2
+  exit 2
+fi
 echo called >> ${codexMarker}
 printf 'feat/codex-fallback\\nfeat/codex-second\\nfeat/codex-third\\n'
 `);
@@ -633,7 +637,7 @@ test('a failed automatically detected Claude falls back to Codex', (t) => {
     'expect eof',
     'set result [wait]',
     'exit [lindex $result 3]',
-  ], null, ['--no-random'], { PATH: `${ais.dir}:${shimDir}:${process.env.PATH}` });
+  ], null, ['--no-random'], { PATH: `${ais.dir}:${shimDir}:/usr/bin:/bin` });
   assert.equal(r.status, 0, `${r.stdout}\\n${r.stderr}`);
   assert.equal(ais.calledClaude(), true, 'Claude must be attempted first');
   assert.equal(ais.calledCodex(), true, 'Codex must be attempted after Claude fails');
@@ -689,7 +693,7 @@ test('--help documents the naming help and how to turn it off', () => {
   assert.match(h, /NAMING HELP/);
   assert.match(h, /GWQADD_AI/);
   assert.match(h, /--no-ai/);
-  assert.match(h, /claude -p first[\s\S]*codex exec if Claude fails/);
+  assert.match(h, /claude -p first[\s\S]*codex exec\s+--skip-git-repo-check if Claude fails/);
 });
 
 // The prompt is assembled from git output, and one of those parses was wrong in
