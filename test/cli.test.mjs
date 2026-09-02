@@ -689,7 +689,7 @@ test('--help documents the naming help and how to turn it off', () => {
   assert.match(h, /NAMING HELP/);
   assert.match(h, /GWQADD_AI/);
   assert.match(h, /--no-ai/);
-  assert.match(h, /claude, codex, opencode, gemini/);
+  assert.match(h, /claude -p first[\s\S]*codex exec if Claude fails/);
 });
 
 // The prompt is assembled from git output, and one of those parses was wrong in
