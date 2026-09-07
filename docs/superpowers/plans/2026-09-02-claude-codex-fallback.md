@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the interactive automatic naming flow try `codex exec` when `claude -p` cannot return a usable branch name.
+**Goal:** Make the interactive automatic naming flow try `codex exec --skip-git-repo-check` when `claude -p` cannot return a usable branch name.
 
 **Architecture:** Keep the existing process runner and branch-name parser. Change automatic AI detection to retain the ordered installed candidates, then advance through that list when a candidate cannot start, exits unsuccessfully, or returns no valid candidates. Explicit `--ai` / `GWQADD_AI` remains a single command with the current manual fallback behavior.
 
