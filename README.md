@@ -104,7 +104,7 @@ gwqadd feat/logout --from main
 Run `gwqadd` with no branch name and it rolls one before it asks you anything:
 
 ```
-│ plume-melting-bearskin   off main
+│ tidy-dancing-kite   off main
 │ create it? [Y]es · [n]o, name it properly · [e]dit · [r]eroll
 ```
 

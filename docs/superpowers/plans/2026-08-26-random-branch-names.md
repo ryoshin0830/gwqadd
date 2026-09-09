@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Superseded in 0.6.0.** The word lists are now filtered through EFF's short
+> wordlist, so the counts (216 / 109 / 407), the namespace (9,582,408), the
+> stride sampling and every sample name below are historical. `CLAUDE.md` I23
+> is the current record. Kept as the design's provenance, not as reference.
+
 **Goal:** Give `gwqadd` an instant, zero-cost branch name — `plume-melting-bearskin` — offered before the AI naming flow and available to scripts through `--random`.
 
 **Architecture:** Three generated word lists live as constants in `bin/gwqadd.mjs`; `randomName()` picks one word from each over `crypto.randomBytes`. Interactive runs offer a random name first and fall through to today's describe→AI flow on `n`. `--random` is the one naming path allowed to run without a terminal.
